@@ -1,0 +1,113 @@
+/* flightgame-fly: the game's page with only the flying left, plus the A320 glareshield (FCU) and the MCDU. */
+
+/* the game's own interface stays loaded (it runs the world) but out of sight */
+body.fly #topbar, body.fly #rail, body.fly #sidebar, body.fly #strip, body.fly #strip-tip, body.fly #menu,
+body.fly #market, body.fly #start-screen, body.fly #newspaper, body.fly #gameover, body.fly .leaflet-control-container { display: none !important; }
+body.fly .view3d-controls button:not(.fly):not(.sat) { display: none; }
+body.fly #pilot-hud .pl-bar { top: 8px; right: 8px; flex-direction: column; }
+
+#fly-badge {
+  position: fixed; top: 8px; left: 8px; z-index: 1900; display: flex; gap: 10px; align-items: center;
+  padding: 6px 10px; border-radius: 8px; background: rgba(8, 10, 14, 0.75); color: #e8eef8; font: 600 13px system-ui, sans-serif;
+}
+#fly-badge a { color: #7fd4ff; text-decoration: none; font-weight: 500; }
+#fly-badge a:hover { text-decoration: underline; }
+body.piloting #fly-badge { display: none; }
+
+/* ---------- FCU (glareshield) ---------- */
+#fcu {
+  --gray: #4a5057; --gray-d: #2e3338; --lcd: #12100c; --amber: #ffa53a; --lbl: #e8eef2;
+  position: fixed; top: 6px; left: 50%; transform: translateX(-50%); z-index: 2100;
+  display: flex; gap: 6px; align-items: stretch; padding: 6px 8px; border-radius: 10px;
+  background: linear-gradient(#5a6168, #42484e); box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.15);
+  font: 600 10px system-ui, "Segoe UI", sans-serif; color: var(--lbl); user-select: none;
+}
+#fcu[hidden] { display: none; }
+@media (max-width: 1100px) { #fcu { zoom: 0.8; } }
+@media (max-width: 860px) { #fcu { zoom: 0.62; } }
+#fcu button { font: inherit; color: inherit; cursor: pointer; }
+.fcu-efis, .fcu-abrk { display: flex; flex-direction: column; gap: 4px; padding: 4px 6px; border-radius: 6px; background: var(--gray-d); align-items: center; }
+.fcu-title { font-size: 9px; letter-spacing: 0.08em; color: #b8c2cc; }
+.fcu-row { display: flex; gap: 4px; align-items: center; }
+.fcu-main { display: flex; gap: 10px; padding: 4px 10px; border-radius: 6px; background: var(--gray-d); }
+.fcu-col { display: flex; flex-direction: column; align-items: center; gap: 3px; min-width: 84px; }
+.fcu-mid { min-width: 96px; justify-content: flex-start; }
+.fcu-lbls { display: flex; gap: 6px; font-size: 9px; letter-spacing: 0.04em; }
+.fcu-lbls span { color: #6b747d; }
+.fcu-lbls span.on { color: var(--lbl); }
+.fcu-win {
+  position: relative; display: flex; align-items: center; justify-content: center; width: 84px; height: 26px; border-radius: 3px;
+  background: var(--lcd); box-shadow: inset 0 0 0 2px #222, inset 0 2px 6px rgba(0, 0, 0, 0.8);
+}
+.fcu-win b { font: 700 19px/1 "Consolas", "DejaVu Sans Mono", ui-monospace, monospace; color: var(--amber); letter-spacing: 0.06em; text-shadow: 0 0 6px rgba(255, 150, 40, 0.55); }
+.fcu-win .dot { position: absolute; right: 5px; top: 50%; width: 6px; height: 6px; margin-top: -3px; border-radius: 50%; background: transparent; }
+.fcu-win .dot.on { background: var(--amber); box-shadow: 0 0 5px var(--amber); }
+.fcu-knobwrap { display: grid; grid-template-columns: 16px 38px 16px; grid-template-rows: 38px auto; gap: 1px 2px; align-items: center; justify-items: center; }
+.fcu-knob {
+  width: 36px; height: 36px; border-radius: 50%; cursor: pointer; position: relative;
+  background: radial-gradient(circle at 40% 35%, #6c737a, #2a2e33 70%); box-shadow: 0 2px 4px rgba(0, 0, 0, 0.6), inset 0 0 0 3px #1d2024;
+}
+.fcu-knob i { position: absolute; inset: 4px; border-radius: 50%; transition: transform 0.08s; }
+.fcu-knob i::after { content: ""; position: absolute; left: 50%; top: 1px; width: 2px; height: 9px; margin-left: -1px; background: #e8eef2; border-radius: 1px; }
+.fcu-knob:hover { box-shadow: 0 0 0 2px #7fd4ff, inset 0 0 0 3px #1d2024; }
+.fcu-turn { width: 16px; height: 28px; padding: 0; border: none; border-radius: 4px; background: transparent; color: #aab4bf !important; font-size: 15px !important; }
+.fcu-turn:hover { background: rgba(255, 255, 255, 0.1); }
+.fcu-pp { grid-column: 1 / 4; display: flex; gap: 2px; }
+.fcu-pp button { padding: 0 4px; border: 1px solid #222; border-radius: 3px; background: #3a4046; font-size: 8px !important; color: #c8d0d8 !important; line-height: 13px; }
+.fcu-pp button:hover { background: #505860; }
+.fcu-btn {
+  position: relative; min-width: 40px; height: 30px; padding: 9px 6px 2px; border: 1px solid #1d2024; border-radius: 3px;
+  background: linear-gradient(#5d646b, #3e444a); box-shadow: 0 2px 2px rgba(0, 0, 0, 0.5); font-size: 10px !important; letter-spacing: 0.03em;
+}
+.fcu-btn.wide { min-width: 84px; }
+.fcu-btn:active { transform: translateY(1px); box-shadow: 0 1px 1px rgba(0, 0, 0, 0.5); }
+.fcu-btn .bar { position: absolute; top: 3px; left: 25%; right: 25%; height: 4px; border-radius: 1px; background: #23272b; }
+.fcu-btn.lit .bar { background: #3cff6a; box-shadow: 0 0 6px #3cff6a; }
+.fcu-btn.decel .bar { background: #3cff6a; }
+.fcu-btn.decel::after { content: "DECEL"; position: absolute; bottom: -11px; left: 0; right: 0; font-size: 7px; color: #3cff6a; }
+.fcu-sel { padding: 3px 6px; border: 1px solid #1d2024; border-radius: 3px; background: #3a4046; font-size: 10px !important; }
+.fcu-sel:hover, .fcu-btn:hover { filter: brightness(1.15); }
+.fcu-hvtf { line-height: 1.2; font-size: 8px !important; padding: 3px 4px; margin: 2px 0 4px; }
+.fcu-aps { margin-top: 2px; }
+.fcu-rng { min-width: 24px; text-align: center; font: 700 11px ui-monospace, monospace; color: #3ccfff; }
+.fcu-inc { font: 700 9px ui-monospace, monospace !important; }
+.fcu-mcdu { margin-top: 4px; }
+.fcu-abrk .fcu-btn { min-width: 46px; height: 24px; padding-top: 7px; }
+
+/* ---------- MCDU ---------- */
+#mcdu {
+  position: fixed; top: 150px; right: 118px; z-index: 2150; width: 330px; padding: 6px 8px 10px; border-radius: 10px;
+  background: linear-gradient(#545a61, #3c4248); box-shadow: 0 10px 30px rgba(0, 0, 0, 0.55);
+  font: 600 10px system-ui, sans-serif; color: #e8eef2; user-select: none;
+}
+#mcdu[hidden] { display: none; }
+#mcdu.typing { box-shadow: 0 0 0 2px #3ccfff, 0 10px 30px rgba(0, 0, 0, 0.55); }
+@media (max-height: 820px) { #mcdu { zoom: 0.82; } }
+#mcdu button { font: inherit; color: inherit; cursor: pointer; }
+.mc-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 0 2px 4px; cursor: move; letter-spacing: 0.1em; }
+.mc-kbd { font-weight: 500; letter-spacing: 0; color: #9ab; }
+#mcdu.typing .mc-kbd { color: #3ccfff; }
+.mc-close { border: none; background: none; font-size: 16px !important; line-height: 1; padding: 0 2px; }
+.mc-face { display: grid; grid-template-columns: 22px 1fr 22px; gap: 3px; align-items: stretch; }
+.mc-lsks { display: flex; flex-direction: column; justify-content: space-around; padding: 20px 0 22px; }
+.mc-lsk { height: 16px; padding: 0; border: 1px solid #1d2024; border-radius: 2px; background: #3a4046; font-size: 8px !important; color: #aab4bf !important; }
+.mc-screen {
+  height: 262px; padding: 4px 6px; border-radius: 3px; background: #050607; box-shadow: inset 0 0 0 2px #1d2024;
+  font: 700 13px/18px "Consolas", "DejaVu Sans Mono", ui-monospace, monospace; overflow: hidden;
+}
+.mc-r { display: flex; justify-content: space-between; white-space: pre; height: 18px; }
+.mc-r.mc-lab { font-size: 10px; line-height: 16px; height: 16px; font-weight: 500; }
+.mc-title { justify-content: center; color: #f2f5f8; }
+.mc-pad-line { margin-top: 2px; }
+.mc-fkeys { display: grid; gap: 3px; margin: 8px 0 6px; }
+.mc-fkeys > div { display: grid; grid-template-columns: repeat(6, 1fr); gap: 3px; }
+.mc-fkeys button, .mc-pad button {
+  height: 22px; padding: 0 2px; border: 1px solid #1d2024; border-radius: 3px; background: linear-gradient(#61686f, #43494f);
+  font-size: 8px !important; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+}
+.mc-fkeys .mc-slew { grid-template-columns: repeat(4, 1fr); width: 66%; }
+.mc-pad { display: grid; grid-template-columns: 96px 1fr; gap: 8px; }
+.mc-num { display: grid; grid-template-columns: repeat(3, 1fr); gap: 3px; align-content: start; }
+.mc-alpha { display: grid; grid-template-columns: repeat(5, 1fr); gap: 3px; }
+.mc-pad button { font-size: 11px !important; height: 21px; background: linear-gradient(#3b4046, #2b2f34); }
+.mc-in { position: absolute; left: 0; bottom: 0; width: 1px; height: 1px; opacity: 0; border: 0; padding: 0; }

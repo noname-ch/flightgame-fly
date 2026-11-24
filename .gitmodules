@@ -1,0 +1,3 @@
+[submodule "flightgame"]
+	path = flightgame
+	url = https://github.com/noname-ch/flightgame.git
