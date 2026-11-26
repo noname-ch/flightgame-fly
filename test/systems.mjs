@@ -187,50 +187,41 @@ async function shot(name) {
   const { data } = await cmd('Page.captureScreenshot', { format: 'png' });
   fs.writeFileSync(path.join(SHOTS, `${name}.png`), Buffer.from(data, 'base64'));
 }
-// A real click (CDP mouse events) on a control of a 3D panel: the head turns to look at it, then its centre is
-// projected through the deck's camera.
-async function clickControl(panelIdx, find, button = 'left', fy = 0) {
-  const where = (panelIdx, find, fy) => {
-    const pit = FG.cockpit3d.pit, panel = pit.panels[panelIdx];
-    const c = panel.controls.find((x) => x.tip && x.tip.includes(find) && x.click);
-    if (!c) return { err: `no control "${find}"` };
-    const mesh = pit.clickables.find((m) => m.userData.panel === panel);
-    // the point on the mesh with that uv: search its triangles
-    const pos = mesh.geometry.attributes.position, uv = mesh.geometry.attributes.uv, idx = mesh.geometry.index.array;
-    // (a control's x, y are in its module's own pixels; ox, oy: the module's corner on the panel, src/panels.js)
-    const U = (c.x + (c.ox || 0)) / panel.W, V = 1 - (c.y + (c.oy || 0) + fy * c.h / 2) / panel.H;
-    for (let t = 0; t < idx.length; t += 3) {
-      const [a, b, d] = [idx[t], idx[t + 1], idx[t + 2]];
-      const ua = [uv.getX(a), uv.getY(a)], ub = [uv.getX(b), uv.getY(b)], ud = [uv.getX(d), uv.getY(d)];
-      const det = (ub[0] - ua[0]) * (ud[1] - ua[1]) - (ud[0] - ua[0]) * (ub[1] - ua[1]);
-      if (Math.abs(det) < 1e-12) continue;
-      const l1 = ((U - ua[0]) * (ud[1] - ua[1]) - (ud[0] - ua[0]) * (V - ua[1])) / det;
-      const l2 = ((ub[0] - ua[0]) * (V - ua[1]) - (U - ua[0]) * (ub[1] - ua[1])) / det;
-      if (l1 < -1e-6 || l2 < -1e-6 || l1 + l2 > 1 + 1e-6) continue;
-      return { p: [0, 1, 2].map((k) => pos.array[a * 3 + k] * (1 - l1 - l2) + pos.array[b * 3 + k] * l1 + pos.array[d * 3 + k] * l2) };
-    }
-    return { err: `"${find}" not on its mesh` };
-  };
-  const w = await evaluate(where, panelIdx, find, fy);
-  if (w.err) throw new Error(w.err);
-  // look at it (from the captain's eye)
-  const ex = await evaluate(() => FG.cockpit3d.EYE_X);
-  const [dx, dy, dz] = [w.p[0] + ex, w.p[1], w.p[2]];
-  const lookDown = await evaluate(() => FG.pilot.LOOK_DOWN);
+// A real click on a control of FlightGear's flight deck (src/fgdeck.js), found by its label: the head turns to it,
+// then its middle is projected through the deck's camera.
+async function clickFg(label, button = 'left', accept = [label], near = false) {
+  const p = await evaluate((label, near) => FG.cockpit3d.fgSpot(label, near), label, near);
+  if (!p) throw new Error(`no control "${label}" on the deck`);
+  const ex = await evaluate(() => FG.cockpit3d.EYE_X), lookDown = await evaluate(() => FG.pilot.LOOK_DOWN);
+  const [dx, dy, dz] = [p[0] + ex, p[1], p[2]];
   await look(Math.atan2(dx, dy) * 180 / Math.PI, Math.atan2(dz, Math.hypot(dx, dy)) * 180 / Math.PI + lookDown);
   const at = await evaluate((p) => {
-    const v = FG.cockpit3d.project(p);
-    const r = FG.view3d.map.getCanvas().getBoundingClientRect();
+    const v = FG.cockpit3d.project(p), r = FG.view3d.map.getCanvas().getBoundingClientRect();
     return { x: r.left + (v[0] + 1) / 2 * r.width, y: r.top + (1 - v[1]) / 2 * r.height, z: v[2] };
-  }, w.p);
-  if (at.z > 1 || at.z < -1) throw new Error(`"${find}" is behind the camera`);
-  const btn = button === 'right' ? 'right' : 'left';
-  await cmd('Input.dispatchMouseEvent', { type: 'mouseMoved', x: at.x, y: at.y });
-  await cmd('Input.dispatchMouseEvent', { type: 'mousePressed', x: at.x, y: at.y, button: btn, clickCount: 1 });
-  await cmd('Input.dispatchMouseEvent', { type: 'mouseReleased', x: at.x, y: at.y, button: btn, clickCount: 1 });
-  await sleep(150);
-  if (process.env.DEBUG) console.log('   ', find, JSON.stringify(at), JSON.stringify(await evaluate((x, y) => ({ el: (document.elementFromPoint(x, y) || {}).className, hit: FG.cockpit3d.hitAt(x, y), last: FG.cockpit3d.clicks.slice(-1)[0], lt: FG.systems.S.lt }), at.x, at.y)));
+  }, p);
+  if (at.z > 1 || at.z < -1) throw new Error(`"${label}" is behind the camera`);
+  const hit = await evaluate((x, y) => FG.cockpit3d.hitAt(x, y).tip, at.x, at.y);
+  if (!accept.includes(hit)) throw new Error(`a click aimed at "${label}" meets "${hit}"`);
+  const n0 = await evaluate(() => FG.cockpit3d.clickCount);
+  // (the click lands when the page gets to it, busy drawing: a moment later, or not at all: then once more)
+  for (let i = 0; i < 3; i++) {
+    const b = button === 'right' ? 'right' : 'left';
+    await cmd('Input.dispatchMouseEvent', { type: 'mouseMoved', x: at.x, y: at.y });
+    await cmd('Input.dispatchMouseEvent', { type: 'mousePressed', x: at.x, y: at.y, button: b, clickCount: 1 });
+    await cmd('Input.dispatchMouseEvent', { type: 'mouseReleased', x: at.x, y: at.y, button: b, clickCount: 1 });
+    if (await waitFor((n0) => FG.cockpit3d.clickCount > n0, 4000, null, n0)) break;
+    if (i === 2) throw new Error(`the click on "${label}" never landed`);
+  }
+  await frame();
+  if (process.env.DEBUG) console.log('   ', label, JSON.stringify(await evaluate(() => ({ clicks: FG.cockpit3d.clicks.slice(-1), cover: FG.cockpit3d.pit.fg.deck.get('controls/engines/engine/fire-btn-cover'), btn: FG.cockpit3d.pit.fg.deck.get('controls/engines/engine/fire-btn'), pb: FG.systems.S.eng[0].firePb }))));
+  await look(FG_LOOK.yaw, FG_LOOK.pitch);
 }
+// a frame drawn (the deck's clicks are carried out and its switches set as the systems have them, once a frame)
+async function frame() {
+  const t0 = await evaluate(() => { FG.view3d.map.triggerRepaint(); return performance.now(); });
+  await waitFor((t0) => { FG.view3d.map.triggerRepaint(); return FG.cockpit3d.drawnAt > t0 + 30; }, 10000, 'a frame drawn', t0);
+}
+const FG_LOOK = { yaw: 0, pitch: 0 };
 // Turn the head, then wait for a frame drawn with it (headless Chrome draws few frames a second).
 async function look(yaw, pitch) {
   const t0 = await evaluate((yaw, pitch) => { FG.view3d.look.yaw = yaw; FG.view3d.look.pitch = pitch; FG.view3d.map.triggerRepaint(); return performance.now(); }, yaw, pitch);
@@ -265,11 +256,11 @@ try {
   if (!lights || lights.strobe !== 1 || lights.beacon !== 1 || lights.land !== 1) errors.push(`pose().pilot.lights: ${JSON.stringify(lights)}`);
   if (!await evaluate(() => document.querySelector('#pilot-hud [data-pl="ovhd"]') !== null || new Promise((r) => setTimeout(() => r(!!document.querySelector('#pilot-hud [data-pl="ovhd"]')), 800)))) errors.push('no 🔆 Overhead button in the HUD bar');
 
-  step('its 3D flight deck: the A320 family\'s, six screens and the standby instrument, the overhead, FCU, main panel and pedestal');
+  step('its 3D flight deck: FlightGear\'s real A320 deck (cockpits/A320-family.fgck), six screens and the standby instrument');
   await evaluate(() => { FG.pilot.state.cam = 'cockpit'; FG.view3d.pilotCam('cockpit'); });
-  await waitFor(() => FG.cockpit3d.pit && FG.cockpit3d.pit.kind === 'a320', 20000, 'the A320 deck to be drawn');
-  const deck = await evaluate(() => ({ screens: FG.cockpit3d.pit.screens.map((x) => x.kind), panels: FG.cockpit3d.pit.panels.length, eyeX: FG.cockpit3d.EYE_X, fcuHidden: !FG.fcu || !document.getElementById('fcu') || document.getElementById('fcu').hidden }));
-  if (deck.screens.join() !== 'pfd,nd,ewd,sd,nd,pfd,isis' || deck.panels !== 4 || deck.eyeX !== 0.5) errors.push(`the A320 deck: ${JSON.stringify(deck)}`);
+  await waitFor(() => { FG.view3d.map.triggerRepaint(); return FG.cockpit3d.pit && FG.cockpit3d.pit.kind === 'a320' && FG.cockpit3d.pit.fg; }, 40000, 'the A320\'s FlightGear deck to be drawn');
+  const deck = await evaluate(() => ({ screens: FG.cockpit3d.pit.screens.map((x) => x.kind), controls: FG.cockpit3d.pit.clickables.length, eyeX: FG.cockpit3d.EYE_X, fcuHidden: !FG.fcu || !document.getElementById('fcu') || document.getElementById('fcu').hidden }));
+  if (deck.screens.join() !== 'pfd,nd,ewd,sd,nd,pfd,isis' || deck.controls < 300 || !(deck.eyeX > 0.3 && deck.eyeX < 0.7)) errors.push(`the A320 deck: ${JSON.stringify(deck)}`);
   if (!await waitFor(() => { const f = document.getElementById('fcu'); return !f || f.hidden; }, 4000)) {
     errors.push(`the FCU window stayed over the view in the 3D deck: ${JSON.stringify(await evaluate(() => ({ hidden: document.getElementById('fcu').hidden, hit: FG.cockpit3d.hitAt(0, 0), cam: FG.pilot.cam, type: FG.pilot.type, ago: performance.now() - FG.cockpit3d.drawnAt })))}`);
   }
@@ -278,35 +269,42 @@ try {
   if (ewdLit < 200) errors.push(`the E/WD's memo stayed blank (${ewdLit} lit pixels)`);
   await shot('a320-ahead');
 
-  step('real clicks: the overhead\'s STROBE and BEACON, the EFIS\'s FD, the FCU\'s ALT knob, the pedestal\'s ENG MASTER 2');
+  step('real clicks: the overhead\'s STROBE and BEACON, the FCU\'s FD and ALT knob, the pedestal\'s ENG 2 master');
   await look(55, 62);
   await shot('a320-overhead');
-  // (a click on a switch's lower half moves it down a position: STROBE from ON to AUTO)
-  await clickControl(3, 'STROBE light', 'left', 0.5);
+  // (the strobe switch: a right click moves it down a position, ON to AUTO; the beacon: a click toggles it)
+  await clickFg('Strobe lights switch', 'right');
   st = await S();
   if (st.lt.strobe !== 'AUTO') errors.push(`a click on STROBE: ${st.lt.strobe} (wanted AUTO)`);
-  await clickControl(3, 'BEACON light', 'left', 0.5);
+  await clickFg('Beacon lights switch');
   st = await S();
   if (st.lt.beacon !== 0) errors.push(`a click on BEACON: ${st.lt.beacon} (wanted 0)`);
   if ((await evaluate(() => FG.pilot.pose().pilot.lights.beacon)) !== 0) errors.push('the beacon switched off stayed on on the 3D aircraft');
+  // (the deck's switch follows the systems: STROBE set on the overhead page)
+  await evaluate(() => FG.systems.set('strobe', 'OFF'));
+  await frame();
+  if (await evaluate(() => FG.cockpit3d.pit.fg.deck.get('controls/switches/strobe')) !== 0) errors.push('STROBE OFF on the overhead page: the deck\'s switch stayed');
+  await evaluate(() => FG.systems.set('strobe', 'AUTO'));
   await look(0, 0);
   await sleep(400);
   // (FD: AP1 does not engage on the ground)
   const fd0 = await evaluate(() => FG.fmgc.F.fd);
-  await clickControl(0, 'FD: the flight directors');
+  await clickFg('Toggle FD1');
   const fd1 = await evaluate(() => FG.fmgc.F.fd);
   if (fd1 === fd0) errors.push(`a click on FD did nothing (${fd0} → ${fd1})`);
-  await clickControl(0, 'FD: the flight directors');
+  await clickFg('Toggle FD1');
   const alt0 = await evaluate(() => FG.fmgc.F.fcu.alt);
-  // (a click on the knob's right edge turns it a step: clickControl hits its centre, so turn with the wheel here)
-  await evaluate(() => { const p = FG.cockpit3d.pit.panels[0]; const c = p.controls.find((x) => x.tip && x.tip.startsWith('ALT knob')); c.click({ fx: 0.9, fy: 0 }); });
+  // (the ALT knob: the wheel turns it)
+  await evaluate(() => { const dk = FG.cockpit3d.pit.fg.deck; const k = dk.def.picks.findIndex((p) => p.label.startsWith('Scroll for altitude target')); dk.press([k], 3); });
+  await frame();
   const alt1 = await evaluate(() => FG.fmgc.F.fcu.alt);
   if (alt1 === alt0) errors.push(`the ALT knob did not turn (${alt0} → ${alt1})`);
   await look(25, -40);
   await shot('a320-pedestal');
-  await clickControl(2, 'ENG MASTER 2', 'left', 0.5);
+  // (the engine master: a right click turns it OFF)
+  await clickFg('Right engine cutoff', 'right');
   st = await S();
-  if (st.eng[1].master !== 0) errors.push(`a click on ENG MASTER 2 left it ${st.eng[1].master}`);
+  if (st.eng[1].master !== 0) errors.push(`a click on ENG 2's master left it ${st.eng[1].master}`);
   await look(0, 0);
 
   step('ENG 2 master off: it runs down and gives no thrust; IGN, the APU\'s bleed and the master on start it again');
@@ -329,10 +327,20 @@ try {
   if (!/ENG 1 FIRE/.test(hud)) errors.push(`the HUD's warnings: ${hud}`);
   await look(80, 55);
   await shot('a320-fire');
-  await clickControl(3, 'ENG 1 FIRE pushbutton');
+  // (its guard up first: a click on it goes past the pushbutton in front, which does nothing while guarded)
+  await clickFg('Engine 1 Fire Cover', 'left', ['Engine 1 Fire Pushbutton', 'Engine 1 Fire Cover'], true);
+  await clickFg('Engine 1 Fire Pushbutton');
   st = await S();
   if (!st.eng[0].firePb) errors.push('a click on the ENG 1 FIRE pushbutton did not push it');
-  await clickControl(3, 'ENG 1 AGENT 1');
+  // (AGENT 1: its control has no label; pressed on the deck)
+  await evaluate(() => {
+    const dk = FG.cockpit3d.pit.fg.deck, p = dk.at('controls/engines/engine/agent1-btn');
+    const k = dk.def.picks.findIndex((pk) => JSON.stringify(pk.actions).includes(`{"Assign":[${p},`) || JSON.stringify(pk.actions).includes(`"Toggle":${p}}`));
+    if (k >= 0) dk.press([k], 0);
+  });
+  await frame();
+  // (its squib armed only once the FIRE pushbutton is out on the deck's own clock: the systems' AGENT 1 then)
+  if (!(await S()).eng[0].agents[0]) await evaluate(() => FG.systems.set('agent', 0, 0));
   await waitFor(() => !FG.systems.S.eng[0].fire, 8000, 'the fire to go out');
   await waitFor(() => !FG.systems.S.mw, 3000, 'the master warning to go out');
   await waitFor(() => FG.pilot.state.n1[0] < FG.pilot.state.spec.idle - 5, 20000, 'ENG 1 to run down (its fuel cut)');
@@ -457,17 +465,20 @@ try {
     await evaluate(() => { FG.pilot.state.cam = 'cockpit'; FG.view3d.pilotCam('cockpit'); });
     const n4 = /^A34/.test(type), want = DECK[type] + (n4 ? 4 : 2);
     await waitFor((want) => FG.cockpit3d.pit && FG.cockpit3d.pit.kind + FG.cockpit3d.pit.nEng === want, 20000, `the ${type}'s deck`, want);
-    const d = await evaluate(() => {
-      const pit = FG.cockpit3d.pit, mods = (k) => pit.panels[k].items.map((it) => it.name);
-      return { fire: pit.panels[3].controls.filter((c) => c.tip && /FIRE pushbutton: push/.test(c.tip)).length, screens: pit.screens.map((x) => x.kind),
-        ovh: mods(3), main: mods(1), ped: mods(2) };
-    });
+    // (its own panels: the overhead page's, src/panels.js; the 3D deck is FlightGear's A320 one for the A320s, A330s and A340s)
+    const d = await evaluate(async (n4) => {
+      const pit = FG.cockpit3d.pit, pn = await import(new URL('src/panels.js', location.href).href);
+      const surf = (name) => pn.surface(name, pit.kind, n4 ? 4 : 2), mods = (name) => surf(name).items.map((it) => it.name);
+      return { fire: surf('overhead').controls.filter((c) => c.tip && /FIRE pushbutton: push/.test(c.tip)).length, screens: pit.screens.map((x) => x.kind),
+        ovh: mods('overhead'), main: mods('main'), ped: mods('pedestal'), fg: !!pit.fg };
+    }, n4);
+    if (/^A3[34]/.test(type) && !d.fg) errors.push(`${type}: not FlightGear's deck`);
     if (d.fire !== (n4 ? 5 : 3)) errors.push(`${type}: ${d.fire} FIRE pushbuttons`);
     if (/^A3[34]/.test(type)) {
       if (!d.ovh.includes('hydW') || d.ovh.includes('hyd')) errors.push(`${type}: overhead HYD ${d.ovh.join(',')}`);
       if (!d.ovh.includes(n4 ? 'fuel340' : 'fuel330')) errors.push(`${type}: overhead FUEL ${d.ovh.join(',')}`);
       if (d.screens.includes('stby3') !== (type === 'A340-300')) errors.push(`${type}: standby instruments ${d.screens.join(',')}`);
-      if (d.main.includes('taxiCam') !== (type === 'A340-600')) errors.push(`${type}: TAXI CAMERA ${d.main.join(',')}`);
+      if (d.ped.includes('taxiCam') !== (type === 'A340-600')) errors.push(`${type}: TAXI CAMERA ${d.ped.join(',')}`);
       if (d.ped.includes('oans') !== (type === 'A330-900')) errors.push(`${type}: OANS ${d.ped.join(',')}`);
       // the hydraulics without a PTU: green from its engine pumps; both off, it goes; its electric pump brings it back
       const hyd = await evaluate(async (n4) => {

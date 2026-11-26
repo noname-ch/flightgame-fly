@@ -226,6 +226,7 @@
   useType(TYPES.A320);
   // cockpit camera: looks this far below the nose (°); more in a 3D flight deck (js/cockpit3d.js), so the screens show
   const pit3d = () => !!(FG.cockpit3d && FG.cockpit3d.has(s.type));
+  const hudDeck = () => /^A35|^A38/i.test(s.type || '');
   const lookDownOf = () => (pit3d() ? 10 : 4);
   // airbus(): Airbus normal law with its protections. With the limiter off (L) an Airbus flies in direct law: as
   // the conventional types, it can stall, overbank and pull as hard as the stick asks.
@@ -1857,8 +1858,9 @@
     const deck = s.cam === 'cockpit' && pit3d();
     const look = (FG.view3d && FG.view3d.look) || { yaw: 0, pitch: 0 };
     if (s.cam === 'cockpit' && !deck) headUp(W, H);
-    else if (deck && Math.abs(look.yaw) < 4 && Math.abs(look.pitch) < 4) {
-      // the head-up display only in its combiner glass in front of the captain
+    else if (deck && hudDeck() && Math.abs(look.yaw) < 4 && Math.abs(look.pitch) < 4) {
+      // the head-up display only in its combiner glass in front of the captain (the A350's and A380's: the A320s,
+      // A330s and A340s have none)
       const cx = W * 0.27, cy = H * 0.07, cw = W * 0.46, ch = H * 0.50;
       ctx.save();
       ctx.fillStyle = 'rgba(120,200,160,0.035)'; ctx.fillRect(cx, cy, cw, ch);

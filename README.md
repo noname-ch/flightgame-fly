@@ -169,19 +169,24 @@ by hand.
 
 ## The 3D flight deck and the systems
 
-In the cockpit camera (C) the Airbuses have a 3D flight deck: the A350s and the A380 the A350's, the A320, A330
-and A340 the A320 family's (six square screens: FMA + PFD, ND, the E/WD over the SD, ND, PFD; the MCDUs on the
-pedestal). Drag to look round; look up and to the right for the overhead panel.
+In the cockpit camera (C) the Airbuses have a 3D flight deck: the A350s and the A380 the A350's, built here; the
+A320s, A330s and A340s FlightGear's real A320-family flight deck (`cockpits/A320-family.fgck`, GPLv2, see
+`cockpits/README.md`; the same pack the Rust app uses), read and played by `src/fgdeck.js`: its switches, knobs,
+guards, levers and lights move as the aircraft's systems have them, and a click on one works the systems (a click
+that does nothing on a control goes on to the one behind it: a guarded pushbutton's guard). The game's instruments
+are drawn on its six screens and its standby instrument. Until the pack has come (7 MB), or with `?built` in the
+address, they fly with the deck built here from the panel modules (six square screens: FMA + PFD, ND, the E/WD over
+the SD, ND, PFD; the MCDUs on the pedestal). Drag to look round; look up and to the right for the overhead panel.
 
-The A330s and A340s sit in a wider nose, with the same panel modules (`src/panels.js` LAYOUTS) and each version's
-own, as built:
+Each version keeps its own on the screens and on the overhead (0) and pedestal (9) pages (`src/panels.js` LAYOUTS;
+the built deck has them in 3D too):
 
 | Deck | Types | What it has of its own |
 |---|---|---|
 | `a330` | A330-200, A330-300 | The enhanced A330: LCD screens and the ISIS. |
-| `a330neo` | A330-900neo | Its EIS2: the trackball (CURSOR CTL) on the pedestal with OANS, the airport map on both NDs (stands, taxiways, runways, buildings; 0.5 to 5 NM). |
+| `a330neo` | A330-900neo | Its EIS2: the trackball (CURSOR CTL) on the pedestal (9) with OANS, the airport map on both NDs (stands, taxiways, runways, buildings; 0.5 to 5 NM). |
 | `a340` | A340-300 | CRT screens and the three round standby instruments (horizon, airspeed, altimeter). |
-| `a346` | A340-600 | LCDs, the ISIS and the TAXI CAMERA button: the fin camera's and the nose-gear camera's picture on the SD on the ground, with the main gear's and the nose wheel's guides over the taxiway (75 m long: the main gear runs 33 m behind you). |
+| `a346` | A340-600 | LCDs, the ISIS and the TAXI CAMERA button on the pedestal (9): the fin camera's and the nose-gear camera's picture on the SD on the ground, with the main gear's and the nose wheel's guides over the taxiway (75 m long: the main gear runs 33 m behind you). |
 
 Their overhead HYD and FUEL panels are their own:
 
@@ -380,7 +385,8 @@ The real recordings are CC0 or CC BY from Freesound and Wikimedia Commons, cut b
 | `src/pilot.js` | The flying: physics (with the wind), PFD, ECAM, the A350's screens, checkpoints. It came from the game's old `js/pilot.js` and now lives only here. |
 | `src/cocksnd.js` | The flight deck's sounds (`FG.cocksnd`): the GPWS and each family's callouts and tones, the recorded insides, motors, breaking parts, crashes. |
 | `src/select.js` | The start screen (`FG.flySelect`): gallery, airport search and map, start, livery, time, wind. |
-| `src/cockpit3d.js` | The 3D flight decks, A350 and A320 family (`FG.cockpit3d`, drawn by the game's view3d.js in the cockpit camera); its panels are clicked in 3D. |
+| `src/cockpit3d.js` | The 3D flight decks: the A350's built here, FlightGear's for the A320 family (`FG.cockpit3d`, drawn by the game's view3d.js in the cockpit camera); their controls are clicked in 3D. |
+| `src/fgdeck.js` | FlightGear's A320-family flight deck (`cockpits/A320-family.fgck`): the pack read, its rules, animations and controls played. |
 | `src/systems.js` | Lights, signs, APU, engine masters, fire and extinguishers, the E/WD's memo (`FG.systems`); other systems plug in. |
 | `src/aircraft.js` | Electrics, hydraulics, fuel, air and pressure, ice, ADIRS, GPWS, the small panels, the SD's pages. |
 | `src/radio.js` | Radios (RMP), ATIS and ATC calls, VOR/ADF receivers, transponder and TCAS (`FG.radio`). |
@@ -396,7 +402,7 @@ The real recordings are CC0 or CC BY from Freesound and Wikimedia Commons, cut b
 ## Testing
 
     node test/smoke.mjs                        # the page, the start screen, the wind, every type (about 3 min)
-    node test/systems.mjs                      # the A320 deck: real clicks, an engine fire fought, a relight (SHOTS=dir: screenshots)
+    node test/systems.mjs                      # the A320's FlightGear deck: real clicks, an engine fire fought, a relight (SHOTS=dir: screenshots)
     python test/run.py [FROM TO [TYPE]]        # e.g. python test/run.py LHR DUB B747-400
 
 This flies a whole flight headless in Chrome (no 3D, flat ground) as fast as the CPU allows:

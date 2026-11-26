@@ -873,7 +873,7 @@ const wideOverhead = (fuel) => swap(swap(LAYOUTS.a320.overhead, 'hyd', 'hydW'), 
 LAYOUTS.a330 = { ...LAYOUTS.a320, overhead: wideOverhead('fuel330') };
 LAYOUTS.a330neo = { ...LAYOUTS.a330, pedestal: [...LAYOUTS.a320.pedestal.filter((l) => l[0] !== 'parkBrk'), ['parkBrk', 340, 938], ['oans', 14, 936]] };
 LAYOUTS.a340 = { ...LAYOUTS.a320, overhead: wideOverhead('fuel340') };
-LAYOUTS.a346 = { ...LAYOUTS.a340, main: [...LAYOUTS.a320.main, ['taxiCam', 432, 188]] };
+LAYOUTS.a346 = { ...LAYOUTS.a340, pedestal: [...LAYOUTS.a320.pedestal, ['taxiCam', 14, 940]] }; // (on the pedestal: its page (9) has it too)
 export const SURFACES = { glareshield: [2560, 128, '#16181b'], main: [1024, 256, '#4b5058'], pedestal: [512, 1024, '#4b5058'], overhead: [1024, 1004, '#4b5058'] };
 // which deck each type flies with (the 3D flight deck where it has one; the 2D pages take the A320's otherwise)
 export function deckOf(type) {

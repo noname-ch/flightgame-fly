@@ -70,6 +70,9 @@
     else Object.assign(L, { strobe: 'AUTO', land: low ? 'ON' : 'RETRACT', nose: low ? 'TO' : 'OFF', rwy: low ? 1 : 0 });
     S.signs.belts = low ? 1 : 0;
     L.dome = 'OFF';
+    // (at night the crew has the panels' lighting up and the flood light on the main panel)
+    const G = FG.game, t = FG.ui && FG.ui.time != null ? FG.ui.time : G && G.state && G.state.time;
+    if (G && G.daylight && t != null && s.lat != null && G.daylight(s.lat, s.lon, t) < 0.4) Object.assign(L, { integ: 1, flood: 0.4 });
     for (const p of plugins) if (p.begin) p.begin(S);
     refreshAll();
   }

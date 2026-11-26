@@ -2,6 +2,8 @@
 //   - 'a350' (A350s, A380): six windows in dark frames, the black glareshield with the FCU and the EFIS panels, six
 //     big landscape screens (information system outboard, PFD + ND in front of each pilot, the engine and warning
 //     display in the middle, the systems display below it), the pedestal with the keyboards (KCCU);
+//   - the A320s, A330s and A340s: FlightGear's real A320-family flight deck (cockpits/A320-family.fgck, played by
+//     src/fgdeck.js: buildFg, fgSync, fgLight below), once its pack has come; until then, or with ?built, these:
 //   - 'a320' (A320): a narrower deck with the A320 family's six square screens (PFD, ND, the E/WD over the SD in the
 //     middle, ND, PFD), the standby instrument, the gear lever and the autobrake beside them, the two MCDUs at the
 //     front of the pedestal;
@@ -79,8 +81,6 @@ const FM = () => (FG.fmgc && FG.fmgc.on ? FG.fmgc : null);
 // The main panel's face round the screens (the modules on it: src/panels.js LAYOUTS[kind].main).
 function mainFace(kind) {
   return (T, b, g, W, H) => {
-    b.fillStyle = 'rgba(255,255,255,0.04)';
-    for (let x = 0; x < W; x += 64) b.fillRect(x, 0, 1, H);
     const six = DECKS[kind] && DECKS[kind].six;
     for (const cx of six ? [200, 824] : [W * 0.27, W * 0.73]) {
       b.fillStyle = '#2f3339'; for (let i = 0; i < 9; i++) b.fillRect(cx - 30 + i * 7, six ? 220 : H * 0.84, 3, 22);
@@ -458,7 +458,7 @@ function build(kind, nEng) {
     // tiller wheel ahead of the stick
     const til = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, 0.018, 24), M.knob); til.rotation.x = Math.PI / 2; til.position.set(s * (HALF - 0.28), 0.50, zt + 0.012); root.add(til);
     // the rudder pedals under the panel
-    for (const dx of [-0.09, 0.09]) root.add(box(0.07, 0.03, 0.14, M.metal, s * EYE_X + dx, P.y - 0.2, -1.05, [-0.5, 0, 0]));
+    for (const dx of [-0.09, 0.09]) root.add(box(0.07, 0.03, 0.14, M.knob, s * EYE_X + dx, P.y - 0.2, -1.05, [-0.5, 0, 0]));
   }
 
   // the overhead panel, under the ceiling from behind the windscreens back over the pilots' heads
@@ -495,6 +495,392 @@ function build(kind, nEng) {
   const scene = new THREE.Scene();
   scene.add(root);
   return { kind, nEng, eyeX: D.EYE_X, scene, screens, gear, levers, sticks, lit, panels, clickables, wipers, hemi, sun, amb, dome, flood };
+}
+
+// ---------- the real A320-family flight deck (FlightGear's, src/fgdeck.js) ----------
+// The A320s, A330s and A340s fly with it once its pack has come (cockpits/A320-family.fgck); the deck built above
+// stands in until then, or if it can't be read. Each version keeps what it has on its screens (the A340-300's CRT
+// look and round standby instruments, the A340-600's taxi camera on the SD, the A330neo's airport map on the NDs);
+// their own overhead panels are on the overhead page (0).
+const FG_PACK = new URL('../cockpits/A320-family.fgck', import.meta.url).href;
+const fg = { pack: null, loading: null, failed: false, Deck: null };
+const fgKind = (kind) => ['a320', 'a330', 'a330neo', 'a340', 'a346'].includes(kind) && !fg.failed && !/[?&]built\b/.test(location.search);
+function fgLoad() {
+  if (fg.loading) return;
+  fg.loading = import(`./fgdeck.js${V}`).then(async (m) => { fg.Deck = m.Deck; fg.pack = await m.load(FG_PACK); })
+    .then(() => { for (const k of Object.keys(pits)) if (fgKind(pits[k].kind) && !pits[k].fg) delete pits[k]; if (FG.view3d && FG.view3d.map) FG.view3d.map.triggerRepaint(); })
+    .catch((e) => { fg.failed = true; console.warn('the A320 family\'s flight deck (FlightGear) did not load:', e); });
+}
+// how bright a lamp the model lights (its emission colour × this)
+const LAMP = 1.6;
+function buildFg(kind, nEng) {
+  const pack = fg.pack;
+  // (pack space: the captain's eye at the origin; the middle of the deck halfway between the two PFDs)
+  const mid = (sc) => { let x = 0; for (let i = 0; i < sc.pos.length; i += 3) x += sc.pos[i]; return x / (sc.pos.length / 3); };
+  const pfds = pack.screens.filter((s) => s.screen === 'pfd');
+  const cx = pfds.length === 2 ? (mid(pfds[0]) + mid(pfds[1])) / 2 : 0.5;
+  D = { ...DECKS[kind], EYE_X: cx };
+  ({ HALF, ROOF, REAR, FLOOR } = D); EYE_X = D.EYE_X;
+  const root = new THREE.Group();
+  root.position.set(-cx, 0, 0);
+  const deck = pack.deck ? new fg.Deck(pack) : null;
+  const def = deck && deck.def;
+  // the textures (sRGB pictures, repeated)
+  const texs = new Map();
+  const texOf = (key) => {
+    if (!key || !pack.textures.has(key)) return null;
+    if (texs.has(key)) return texs.get(key);
+    const img = new Image();
+    const t = new THREE.Texture(img);
+    t.colorSpace = THREE.SRGBColorSpace; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 4; t.flipY = false; // (the pack's texture places count from the top)
+    img.onload = () => { t.needsUpdate = true; if (FG.view3d && FG.view3d.map) FG.view3d.map.triggerRepaint(); };
+    img.src = URL.createObjectURL(pack.textures.get(key));
+    t.userData.png = pack.textures.get(key).type === 'image/png';
+    texs.set(key, t);
+    return t;
+  };
+  const geoOf = (b, uv) => {
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(b.pos, 3));
+    g.setAttribute('normal', new THREE.BufferAttribute(b.nor, 3));
+    g.setAttribute('uv', new THREE.BufferAttribute(uv || b.uv, 2));
+    g.setIndex(new THREE.BufferAttribute(b.idx, 1));
+    g.computeBoundingSphere();
+    return g;
+  };
+  // the nodes that move, light up or are clicked: a group each, posed from the deck
+  const nodes = new Map();
+  const nodeOf = (n) => {
+    if (!n || !def || !def.nodes[n]) return root;
+    if (!nodes.has(n)) { const g = new THREE.Group(); g.matrixAutoUpdate = false; root.add(g); nodes.set(n, g); }
+    return nodes.get(n);
+  };
+  const litBy = (n) => !!(def && def.nodes[n] && def.nodes[n].anims.some((a) => def.anims[a].Emit));
+  // materials: the parts with the same texture and colour share one, a part an animation lights has its own
+  const shared = new Map(), mats = [];
+  const clickables = [];
+  for (const b of pack.parts) {
+    const lamp = !!(def && def.nodes[b.node] && def.nodes[b.node].lamp), lit = litBy(b.node) ? b.node : 0;
+    const key = `${b.tex}|${b.rgb}|${b.emis}|${lamp}`;
+    let m = lit ? null : shared.get(key);
+    if (!m) {
+      const map = texOf(b.tex);
+      m = new THREE.MeshStandardMaterial({ map, emissiveMap: map, emissive: 0x000000, roughness: 0.72, metalness: 0.04, side: THREE.DoubleSide, alphaTest: map && map.userData.png ? 0.5 : 0 });
+      m.color.setRGB(b.rgb[0], b.rgb[1], b.rgb[2], THREE.SRGBColorSpace);
+      const lin = b.rgb.map((c) => Math.pow(c, 2.2));
+      // (a lamp of the model's own glows in its colour; a lamp an animation shows glows while shown)
+      const own = b.emis > 0 ? lin.map((c) => c * b.emis * LAMP) : lamp ? lin.map((c) => c * LAMP * 0.6) : [0, 0, 0];
+      mats.push({ m, own, node: lit, last: '' });
+      if (!lit) shared.set(key, m);
+    }
+    const mesh = new THREE.Mesh(geoOf(b), m);
+    nodeOf(b.node).add(mesh);
+    if (def && b.node && def.nodes[b.node] && def.nodes[b.node].picks.length) { mesh.userData.fgNode = b.node; clickables.push(mesh); }
+  }
+  // the screens: each a canvas the instruments are drawn on (the A340-300's standby: its three round instruments)
+  const screens = [];
+  for (const s of pack.screens) {
+    const kindS = s.screen === 'pfd' ? 'pfd' : s.screen === 'nd' ? 'nd' : s.screen === 'engines' ? 'ewd' : s.screen === 'systems' ? 'sd' : D.stby3 ? 'stby3' : 'isis';
+    const px = kindS === 'isis' ? 256 : kindS === 'stby3' ? 320 : 640;
+    const cv = canvas(px, px), tex = texture(cv);
+    const uv = new Float32Array(s.uv.length);
+    for (let i = 0; i < s.uv.length; i += 2) { uv[i] = Math.min(1, Math.max(0, s.uv[i])); uv[i + 1] = 1 - Math.min(1, Math.max(0, s.uv[i + 1])); }
+    const mat = new THREE.MeshBasicMaterial({ map: tex, toneMapped: false, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4 });
+    root.add(new THREE.Mesh(geoOf(s, uv), mat));
+    screens.push({ kind: kindS, cv, ctx: cv.getContext('2d'), tex, side: s.n ? 1 : 0 });
+  }
+  // lights: the sky through the windows, the sun, the dome light and the flood light under the glareshield
+  const hemi = new THREE.HemisphereLight(0xdfeaff, 0x3a3630, 1.2);
+  const sun = new THREE.DirectionalLight(0xfff3e0, 1.6);
+  const amb = new THREE.AmbientLight(0xffffff, 0.35);
+  const dome = new THREE.PointLight(0xffe2b8, 0, 4, 1); dome.position.set(0, -0.3, 0.35);
+  const flood = new THREE.PointLight(0xfff0d8, 0, 1.8, 1.2);
+  { const s = pack.screens.find((x) => x.screen === 'engines'); let y = 0.7, z = -0.2; if (s) { y = 0; z = 0; for (let i = 0; i < s.pos.length; i += 3) { y += s.pos[i + 1]; z += s.pos[i + 2]; } y /= s.pos.length / 3; z /= s.pos.length / 3; } flood.position.set(0, y - 0.3, z + 0.12); }
+  const scene = new THREE.Scene();
+  scene.add(root, hemi, sun, sun.target, amb, dome, flood);
+  return { kind, nEng, eyeX: cx, D, scene, screens, lit: [], panels: [], clickables, hemi, sun, amb, dome, flood, fg: { deck, nodes, mats, gen: -1, glow: -1 } };
+}
+// The FlightGear flight deck's switches from the systems, and its clicks to them: FlightGear's A320 properties
+// (switches 0 / 0.5 / 1 from the bottom up; momentary buttons a pulse on their *-translate).
+function fgProp(name, x, was) {
+  const y = SYS(), P = P_();
+  if (!y || !P) return;
+  const S = y.S, on = x > 0.25, pulse = x !== 0 && was === 0, b = (v) => (v ? 1 : 0);
+  const tri = (a, m, c) => (x < 0.25 ? a : x < 0.75 ? m : c);
+  const eng = /engine\[(\d)\]/.test(name) ? +name.match(/engine\[(\d)\]/)[1] : 0;
+  const set = (w, v, i) => y.set(w, v, i);
+  const wide = S.hyd && S.hyd.plan;
+  // (the A320 overhead's pumps on a widebody: its engine pumps per system, its electric pumps)
+  const edp = (k) => { for (const key of Object.keys(S.hyd.edp)) if (key[0] === k && !!S.hyd.edp[key] !== on) set('edp', key); };
+  const elecP = (k) => { if (!!S.hyd.elecP[k] !== on) set('elecPump', k); };
+  switch (name) {
+    case 'controls/switches/strobe': return set('strobe', tri('OFF', 'AUTO', 'ON'));
+    case 'controls/switches/beacon': return set('beacon', b(on));
+    case 'controls/switches/wing-lights': return set('wing', b(on));
+    case 'controls/lighting/nav-lights-switch': return set('nav', b(on));
+    case 'controls/lighting/turnoff-light-switch': return set('rwy', b(on));
+    case 'controls/switches/landing-lights-l': case 'controls/switches/landing-lights-r': return set('land', tri('RETRACT', 'OFF', 'ON'));
+    case 'controls/lighting/taxi-light-switch': return set('nose', tri('OFF', 'TAXI', 'TO'));
+    case 'controls/switches/seatbelt-sign': return set('belts', b(on));
+    case 'controls/switches/no-smoking-sign': return set('smoke', b(on));
+    case 'controls/switches/emer-lights': return set('emerExit', tri('OFF', 'ARM', 'ON'));
+    case 'controls/lighting/dome-norm': return set('dome', tri('OFF', 'DIM', 'BRT'));
+    case 'controls/switches/annun-test': return set('ann', on ? 'TEST' : 'BRT');
+    case 'controls/lighting/overhead-panel-knb': return set('integ', x);
+    case 'controls/lighting/main-flood-knb': return set('flood', x);
+    case 'controls/switches/wiperLspd': return set('wiper', Math.round(x), 0);
+    case 'controls/switches/wiperRspd': return set('wiper', Math.round(x), 1);
+    case 'controls/switches/terr_on_nd_l': return set('terrNd', b(on), 0);
+    case 'controls/switches/terr_on_nd_r': return set('terrNd', b(on), 1);
+    case 'controls/electrical/switches/bat-1': return set('bat', b(on), 0);
+    case 'controls/electrical/switches/bat-2': return set('bat', b(on), 1);
+    case 'controls/electrical/switches/gen-1': return set('gen', b(on), 0);
+    case 'controls/electrical/switches/gen-2': return set('gen', b(on), S.eng.length - 1);
+    case 'controls/electrical/switches/apu': return set('apuGen', b(on));
+    case 'controls/electrical/switches/ext-pwr': return set('extPwr', b(on));
+    case 'controls/electrical/switches/bus-tie': return set('busTie', b(on));
+    case 'controls/electrical/switches/galley': return set('galley', b(on));
+    case 'controls/electrical/switches/gen-1-line-contactor': return set('gen1Line', b(!on));
+    case 'controls/electrical/switches/emer-elec-man-on': case 'controls/hydraulic/switches/rat-man': if (on) set('ratMan'); return;
+    case 'controls/hydraulic/switches/green-edp': return wide ? edp('G') : set('engPump', b(on), 0);
+    case 'controls/hydraulic/switches/yellow-edp': return wide ? edp('Y') : set('engPump', b(on), S.eng.length - 1);
+    case 'controls/hydraulic/switches/ptu': return wide ? edp('B') : set('ptu', b(on));
+    case 'controls/hydraulic/switches/yellow-elec': return wide ? elecP('Y') : set('yElec', b(on));
+    case 'controls/hydraulic/switches/blue-elec': return wide ? elecP('B') : set('bElec', b(on));
+    case 'controls/fuel/switches/pump-left-1': return set('fuelPump', b(on), 'L1');
+    case 'controls/fuel/switches/pump-left-2': return set('fuelPump', b(on), 'L2');
+    case 'controls/fuel/switches/pump-center-1': return set('fuelPump', b(on), 'CL');
+    case 'controls/fuel/switches/pump-center-2': return set('fuelPump', b(on), 'CR');
+    case 'controls/fuel/switches/pump-right-1': return set('fuelPump', b(on), 'R1');
+    case 'controls/fuel/switches/pump-right-2': return set('fuelPump', b(on), 'R2');
+    case 'controls/fuel/switches/crossfeed': return set('xfeed', b(on));
+    case 'controls/fuel/switches/center-mode': return set('modeSel', on ? 'AUTO' : 'MAN');
+    case 'controls/pneumatics/switches/bleed-1': return set('engBleed', b(on), 0);
+    case 'controls/pneumatics/switches/bleed-2': return set('engBleed', b(on), S.eng.length - 1);
+    case 'controls/pneumatics/switches/apu': return set('apuBleed', b(on));
+    case 'controls/pneumatics/switches/pack-1': return set('pack', b(on), 0);
+    case 'controls/pneumatics/switches/pack-2': return set('pack', b(on), 1);
+    case 'controls/ice-protection/wing': return set('wingAntiIce', b(on));
+    case 'controls/ice-protection/leng': return set('engAntiIce', b(on), 0);
+    case 'controls/ice-protection/reng': return set('engAntiIce', b(on), S.eng.length - 1);
+    case 'controls/ice-protection/windowprobeheat': return set('probeHeat', on ? 'ON' : 'AUTO');
+    case 'controls/oxygen/cockpit-oxygen-supply-pb': return set('crewOxy', b(!on));
+    case 'controls/oxygen/passenger-mask-deploy-man': if (on) set('paxMasks'); return;
+    case 'controls/apu/master': return set('apuMaster', b(on));
+    case 'controls/cockpit/apu-start-translate': if (pulse) set('apuStart'); return;
+    case 'controls/apu/fire-btn': if (on) set('firePb', undefined, 'apu'); return;
+    case 'controls/apu/agent-btn': if (on) set('agent', 0, 'apu'); return;
+    case 'controls/ignition/start-sw': return set('engMode', ['CRANK', 'NORM', 'IGN'][Math.min(2, Math.max(0, Math.round(x)))]);
+    case 'controls/cockpit/evac-translate': if (pulse) set('evac'); return;
+    case 'controls/cockpit/gndcall-translate': if (pulse) set('callMech'); return;
+    case 'controls/cockpit/allcall-translate': if (pulse) set('callAll'); return;
+    case 'controls/atc/mode-knob': return set('xpdrMode', ['STBY', 'AUTO', 'ON'][Math.min(2, Math.max(0, Math.round(x)))]);
+    case 'controls/atc/abv-blw': return set('traffic', x < -0.5 ? 'BLW' : x > 0.5 ? 'ABV' : 'ALL');
+    case 'controls/cockpit/atc-ident-translate': if (pulse) set('ident'); return;
+    case 'controls/cockpit/atc-clr-translate': if (pulse) set('xpdrCode', '0000'); return;
+    case 'controls/navigation/switching/att-hdg': return set('attHdg', x < -0.5 ? 'CAPT 3' : x > 0.5 ? 'F/O 3' : 'NORM');
+    case 'controls/navigation/switching/air-data': return set('airData', x < -0.5 ? 'CAPT 3' : x > 0.5 ? 'F/O 3' : 'NORM');
+    case 'instrumentation/mk-viii/inputs/discretes/gpws-inhibit': return set('gpwsSys', b(!on));
+    case 'instrumentation/mk-viii/inputs/discretes/ta-tcf-inhibit': return set('gpwsTerr', b(!on));
+    case 'instrumentation/mk-viii/inputs/discretes/glideslope-inhibit': return set('gpwsGs', b(!on));
+    case 'instrumentation/mk-viii/inputs/discretes/momentary-flap-all-override': return set('gpwsFlap', b(!on));
+    case 'instrumentation/mk-viii/inputs/discretes/momentary-flap-3-override': return set('gpwsLdg3', b(on));
+    default: {
+      let m;
+      if ((m = name.match(/^controls\/navigation\/adirscp\/switches\/ir-(\d)-mode$/))) set('irMode', ['OFF', 'NAV', 'ATT'][Math.min(2, Math.max(0, Math.round(x)))], m[1] - 1);
+      else if ((m = name.match(/^controls\/navigation\/adirscp\/lights\/adr-(\d)-off$/))) set('adr', b(!on), m[1] - 1);
+      else if ((m = name.match(/^controls\/cockpit\/adr(\d)-translate$/))) { if (pulse && m[1] >= 1 && m[1] <= 3) set('adr', undefined, m[1] - 1); }
+      else if (name.endsWith('/cutoff-switch')) { for (const i of engsOf(eng, S.eng.length)) set('master', b(!on), i); }
+      else if (name.endsWith('/fire-btn')) { if (on) for (const i of engsOf(eng, S.eng.length)) set('firePb', undefined, i); }
+      else if (name.endsWith('/agent1-btn')) { if (on) for (const i of engsOf(eng, S.eng.length)) set('agent', 0, i); }
+      else if (name.endsWith('/agent2-btn')) { if (on) for (const i of engsOf(eng, S.eng.length)) set('agent', 1, i); }
+      else if ((m = name.match(/^controls\/cockpit\/atc-(\d)-translate$/))) { if (pulse && S.radio) set('xpdrCode', `${String(S.radio.xpdr.code).slice(1)}${m[1]}`); }
+      else if ((m = name.match(/^controls\/cockpit\/(\w+)-btn-translate$/))) {
+        const key = { eng: 'ENG', apu: 'APU', bleed: 'BLEED', cond: 'COND', press: 'PRESS', door: 'DOOR', elec: 'ELEC', wheel: 'WHEEL', hyd: 'HYD', fctl: 'F/CTL', fuel: 'FUEL', all: 'ALL', sts: 'STS', rcl: 'RCL', clrl: 'CLR', clrr: 'CLR' }[m[1]];
+        if (pulse && key) set('ecp', key);
+      }
+    }
+  }
+}
+// (the A320 deck's two engine controls on a four-engined aircraft: the left one works engines 1 and 2, the right 3 and 4)
+const engsOf = (side, n) => (n === 4 ? (side ? [2, 3] : [0, 1]) : [side ? n - 1 : 0]);
+// the deck's clicks carried out, then its switches, levers and lights set as the aircraft has them
+function fgSync(dt) {
+  const f = pit.fg, d = f.deck, P = P_();
+  if (!d || !P) return;
+  const s = P.state, M = FG.fmgc, y = SYS();
+  for (const e of d.events.splice(0)) {
+    switch (e.e) {
+      case 'gear': gearLever(); break;
+      case 'flaps': {
+        const C = (s.spec && s.spec.conf) || [];
+        if (C.length < 2) break;
+        const notch = (k) => ({ 0: 0, 1: 1, '1+F': 1, 2: 2, 3: 3, FULL: 4 }[C[k] && C[k].name] ?? k);
+        const was = notch(s.conf), dir = e.up ? -1 : 1;
+        s.conf = Math.max(0, Math.min(C.length - 1, s.conf + dir));
+        if (notch(s.conf) === was) s.conf = Math.max(0, Math.min(C.length - 1, s.conf + dir)); // (1 and 1+F: one notch)
+        break;
+      }
+      case 'fcu': if (M) M.turn(e.knob, e.steps, e.big); break;
+      case 'fcuPush': if (M) M.push(e.knob); break;
+      case 'fcuPull': if (M) M.pull(e.knob); break;
+      case 'athr': if (M) M.press('ATHR'); break;
+      case 'athrOff': if (M && s.athr) M.press('ATHR'); break;
+      case 'ap':
+        if (!M) break;
+        if (e.n === 0) M.disconnect('button');
+        else if (e.on !== !!M.F[`ap${e.n}`]) M.engage(e.n);
+        break;
+      case 'press': if (M && e.btn) M.press(e.btn); break;
+      case 'thrust': s.lever = Math.max(0, Math.min(1, Math.max(0, s.lever || 0) + e.dx)); s.afloor = false; break;
+      case 'reverse':
+        if (!s.spec.rev || !s.onGround) break;
+        if (e.on !== (s.lever < 0)) s.lever = e.on ? -1 : 0;
+        break;
+      case 'speedbrake': if (s.spec.speedBrake) s.sb = Math.max(0, Math.min(1, e.x)); break;
+      case 'armed': if (s.spec.groundSpoilers) s.armed = e.on; break;
+      case 'parking': s.parking = e.on; P.api.say(e.on ? 'Parking brake set' : 'Parking brake released', 'info', 1500); break;
+      case 'prop': if (e.name === 'ecp') { if (y) y.set('ecp', e.key); } else fgProp(e.name, e.x, e.was); break;
+      default:
+    }
+  }
+  // the switches as the systems have them (set on the overhead page, by the keys or by the systems)
+  if (y && y.S && y.S.elec) {
+    const S = y.S, b = (v) => (v ? 1 : 0), tri = (v, a, m) => (v === a ? 0 : v === m ? 0.5 : 1), n = S.eng.length;
+    const L = S.lt, E = S.elec, H = S.hyd, F = S.fuel, R = S.air, X = S.misc || {}, A = S.adirs, G = S.gpws;
+    const set = (k, v) => d.set(k, v);
+    set('controls/switches/strobe', tri(L.strobe, 'OFF', 'AUTO'));
+    set('controls/switches/beacon', b(L.beacon));
+    set('controls/switches/wing-lights', b(L.wing));
+    set('controls/lighting/nav-lights-switch', b(L.nav));
+    set('controls/lighting/turnoff-light-switch', b(L.rwy));
+    set('controls/switches/landing-lights-l', tri(L.land, 'RETRACT', 'OFF'));
+    set('controls/switches/landing-lights-r', tri(L.land, 'RETRACT', 'OFF'));
+    set('controls/lighting/taxi-light-switch', tri(L.nose, 'OFF', 'TAXI'));
+    set('controls/lighting/dome-norm', tri(L.dome, 'OFF', 'DIM'));
+    set('controls/lighting/overhead-panel-knb', L.integ);
+    set('controls/lighting/main-flood-knb', L.flood);
+    set('controls/switches/seatbelt-sign', b(S.signs.belts));
+    set('controls/switches/no-smoking-sign', b(S.signs.smoke));
+    if (X.emerExit) set('controls/switches/emer-lights', tri(X.emerExit, 'OFF', 'ARM'));
+    set('controls/electrical/switches/bat-1', b(E.bat[0]));
+    set('controls/electrical/switches/bat-2', b(E.bat[1]));
+    set('controls/electrical/switches/gen-1', b(E.gen[0]));
+    set('controls/electrical/switches/gen-2', b(E.gen[n - 1]));
+    set('controls/electrical/switches/apu', b(E.apuGen));
+    set('controls/electrical/switches/bus-tie', b(E.busTie));
+    set('controls/electrical/switches/galley', b(E.galley));
+    if (H.plan) {
+      const any = (k) => b(Object.keys(H.edp).some((key) => key[0] === k && H.edp[key]));
+      set('controls/hydraulic/switches/green-edp', any('G'));
+      set('controls/hydraulic/switches/yellow-edp', any('Y'));
+      set('controls/hydraulic/switches/ptu', any('B'));
+      set('controls/hydraulic/switches/yellow-elec', b(H.elecP.Y));
+      set('controls/hydraulic/switches/blue-elec', b(H.elecP.B));
+    } else {
+      set('controls/hydraulic/switches/green-edp', b(H.engPump[0]));
+      set('controls/hydraulic/switches/yellow-edp', b(H.engPump[n - 1]));
+      set('controls/hydraulic/switches/ptu', b(H.ptu));
+      set('controls/hydraulic/switches/yellow-elec', b(H.yElec));
+      set('controls/hydraulic/switches/blue-elec', b(H.bElec));
+    }
+    for (const [k, p] of [['L1', 'left-1'], ['L2', 'left-2'], ['CL', 'center-1'], ['CR', 'center-2'], ['R1', 'right-1'], ['R2', 'right-2']]) set(`controls/fuel/switches/pump-${p}`, b(F.pump[k]));
+    set('controls/fuel/switches/crossfeed', b(F.xfeed));
+    set('controls/fuel/switches/center-mode', b(F.modeSel === 'AUTO'));
+    set('controls/pneumatics/switches/bleed-1', b(R.engBleed[0]));
+    set('controls/pneumatics/switches/bleed-2', b(R.engBleed[n - 1]));
+    set('controls/pneumatics/switches/apu', b(S.apu.bleed));
+    set('controls/pneumatics/switches/pack-1', b(R.pack[0]));
+    set('controls/pneumatics/switches/pack-2', b(R.pack[1]));
+    set('controls/ice-protection/wing', b(S.wingAntiIce));
+    set('controls/ice-protection/leng', b(S.eng[0] && S.eng[0].antiIce));
+    set('controls/ice-protection/reng', b(S.eng[n - 1] && S.eng[n - 1].antiIce));
+    if (S.ice) set('controls/ice-protection/windowprobeheat', b(S.ice.probe === 'ON'));
+    set('controls/apu/master', b(S.apu.master));
+    set('controls/apu/fire-btn', b(S.apu.firePb));
+    set('controls/ignition/start-sw', S.engMode === 'CRANK' ? 0 : S.engMode === 'IGN' ? 2 : 1);
+    const sides = n === 4 ? [[0, 1], [2, 3]] : [[0], [n - 1]];
+    sides.forEach((es, k) => {
+      const p = k ? 'controls/engines/engine[1]' : 'controls/engines/engine';
+      set(`${p}/cutoff-switch`, b(!es.every((i) => S.eng[i] && S.eng[i].master)));
+      set(`${p}/fire-btn`, b(es.some((i) => S.eng[i] && S.eng[i].firePb)));
+    });
+    if (X.crewOxy != null) set('controls/oxygen/cockpit-oxygen-supply-pb', b(!X.crewOxy));
+    if (A) for (let k = 0; k < 3; k++) {
+      if (A.ir && A.ir[k]) set(`controls/navigation/adirscp/switches/ir-${k + 1}-mode`, A.ir[k].mode === 'OFF' ? 0 : A.ir[k].mode === 'ATT' ? 2 : 1);
+      if (A.adr) set(`controls/navigation/adirscp/lights/adr-${k + 1}-off`, b(!A.adr[k]));
+    }
+    if (G) {
+      set('instrumentation/mk-viii/inputs/discretes/gpws-inhibit', b(!G.sys));
+      set('instrumentation/mk-viii/inputs/discretes/ta-tcf-inhibit', b(!G.terr));
+      set('instrumentation/mk-viii/inputs/discretes/glideslope-inhibit', b(!G.gs));
+      set('instrumentation/mk-viii/inputs/discretes/momentary-flap-all-override', b(!G.flap));
+      set('instrumentation/mk-viii/inputs/discretes/momentary-flap-3-override', b(G.ldg3));
+    }
+  }
+  // the flight's own: gear, flaps, the thrust levers, speed brakes, brakes, the side-sticks, the FCU's lights
+  d.set('controls/gear/lever-cockpit', s.gearDown ? 3 : 0);
+  const gr = s.gear ?? 1, status = gr > 0.99 ? 2 : gr < 0.01 ? 0 : 1;
+  for (const k of ['systems/gear/unit/status', 'systems/gear/unit[1]/status', 'systems/gear/unit[2]/status']) d.set(k, status);
+  for (const k of ['gear/gear/wow', 'gear/gear[1]/wow', 'gear/gear[2]/wow']) d.set(k, s.onGround ? 1 : 0);
+  const C = (s.spec && s.spec.conf) || [];
+  d.set('controls/flight/flaps-input', ({ 0: 0, 1: 1, '1+F': 1, 2: 2, 3: 3, FULL: 4 }[C[s.conf] && C[s.conf].name] ?? Math.min(4, s.conf || 0)));
+  // (the thrust levers: idle 0°, CL 25°, FLX/MCT 35°, TOGA 45°; the reversers' latches)
+  const l = Math.max(0, s.lever || 0), AT = [0, 0.86, 0.93, 1], DEGS = [0, 25, 35, 45];
+  let k = 1; while (k < 3 && l > AT[k]) k++;
+  const ang = DEGS[k - 1] + (DEGS[k] - DEGS[k - 1]) * Math.max(0, Math.min(1, (l - AT[k - 1]) / (AT[k] - AT[k - 1])));
+  const rev = s.lever < 0 ? 0.1 + 0.9 * Math.min(1, -s.lever) : 0;
+  for (const [a, r, t] of [['systems/fadec/control-1/lever/angle', 'systems/fadec/reverse-1/throttle-lever', 'controls/engines/engine/throttle'], ['systems/fadec/control-2/lever/angle', 'systems/fadec/reverse-2/throttle-lever', 'controls/engines/engine[1]/throttle']]) {
+    d.set(a, ang); d.set(r, rev); d.set(t, l);
+  }
+  d.set('spoilers/lever-cmd', s.sb || 0);
+  d.set('controls/flight/speedbrake', s.sb || 0);
+  d.set('controls/flight/speedbrake-arm', s.armed ? 1 : 0);
+  d.set('controls/gear/brake-parking', s.parking ? 1 : 0);
+  d.set('controls/gear/brake-left', s.brake || 0);
+  d.set('controls/gear/brake-right', s.brake || 0);
+  d.set('controls/flight/aileron', s.roll || 0);
+  d.set('controls/flight/elevator', -(s.stick || 0));
+  d.set('systems/fbw/sidestick/yaw-input-cmd', s.rud || 0);
+  d.set('it-autoflight/output/athr', s.athr && s.spec.athr ? 1 : 0);
+  d.set('it-autoflight/input/spd-managed', s.spdSel == null ? 1 : 0);
+  if (M && M.F) {
+    d.set('it-autoflight/output/ap1', M.F.ap1 ? 1 : 0); d.set('it-autoflight/output/ap2', M.F.ap2 ? 1 : 0);
+    d.set('it-autoflight/output/fd1', M.F.fd ? 1 : 0); d.set('it-autoflight/output/fd2', M.F.fd ? 1 : 0);
+    d.set('it-autoflight/output/loc-arm', M.F.locBtn || M.F.appr ? 1 : 0); d.set('it-autoflight/output/gs-arm', M.F.appr ? 1 : 0);
+    d.set('controls/autobrake/mode', { LO: 1, MED: 2, MAX: 3 }[M.F.abrk] || 0);
+    if (M.F.nd) { d.set('instrumentation/efis/inputs/range-nm', M.F.nd.range); d.set('instrumentation/efis[1]/inputs/range-nm', M.F.nd.range); }
+  }
+  if (y && y.S && y.S.misc) {
+    const pg = y.S.misc.ecp;
+    for (const [key, p] of [['APU', 'apu'], ['BLEED', 'bleed'], ['COND', 'cond'], ['DOOR', 'door'], ['ELEC', 'elec'], ['ENG', 'eng'], ['F/CTL', 'fctl'], ['FUEL', 'fuel'], ['HYD', 'hyd'], ['PRESS', 'press'], ['WHEEL', 'wheel'], ['STS', 'sts']]) d.set(`ECAM/Lower/light/${p}`, pg === key ? 1 : 0);
+  }
+  d.step(dt);
+  // every node posed (only when a pose changed)
+  if (d.gen !== f.gen) {
+    f.gen = d.gen;
+    for (const [n, g] of f.nodes) {
+      const p = d.poses[n];
+      if (!p) continue;
+      g.visible = p.vis;
+      if (p.m) g.matrix.fromArray(p.m); else g.matrix.identity();
+      g.matrixWorldNeedsUpdate = true;
+    }
+  }
+}
+// its lighting: a little of each texture's own colour (the panels lit from within at night, as INT LT has them),
+// the model's lamps, and the lamps its animations light
+function fgLight(day) {
+  const f = pit.fg, d = f.deck, y = SYS();
+  const L = y ? y.S.lt : null;
+  const night = 1 - Math.max(0, Math.min(1, day));
+  const k = 0.03 * (1 - night) + 0.10 * night * night * (L ? 0.2 + 0.8 * L.integ : 1);
+  for (const x of f.mats) {
+    const lamp = x.node && d ? d.poses[x.node] && d.poses[x.node].emit : null;
+    const e = [0, 1, 2].map((c) => k * [1, 0.97, 0.92][c] + x.own[c] + (lamp ? lamp[c] * LAMP : 0));
+    const key = e.map((v) => v.toFixed(3)).join();
+    if (key !== x.last) { x.last = key; x.m.emissive.setRGB(e[0], e[1], e[2]); }
+  }
 }
 
 // The side console: the tiller, the nose-wheel and a tray table's outline.
@@ -1029,22 +1415,34 @@ const ray = new THREE.Raycaster();
 const ndc = new THREE.Vector2();
 let tipEl = null, hooked = false, downAt = null;
 const clicks = []; // (the last clicks on controls: FG.cockpit3d.clicks, for the tests)
+let clickCount = 0;
 const shown = () => !!pit && performance.now() - drawnAt < 1500 && !!FG.pilot && FG.pilot.active && FG.pilot.cam === 'cockpit' && has(FG.pilot.type); // (slow machines draw few frames)
 function pick(ev) {
   if (!shown() || !FG.view3d || !FG.view3d.map) return null;
   const r = FG.view3d.map.getCanvas().getBoundingClientRect();
   ndc.set(((ev.clientX - r.left) / r.width) * 2 - 1, -((ev.clientY - r.top) / r.height) * 2 + 1);
   ray.setFromCamera(ndc, camera);
-  const hit = ray.intersectObjects(pit.clickables, false)[0];
+  const hits = ray.intersectObjects(pit.clickables, false), hit = hits[0];
   if (!hit) return null;
   const u = hit.object.userData;
   if (u.click) return { c: u.click, fx: 0, fy: 0 };
+  if (u.fgNode && pit.fg && pit.fg.deck) {
+    // (FlightGear's deck: the node's controls; left click, right click (its middle button), the wheel. A click that
+    // does nothing there goes on to the control behind it: a guard's pushbutton is in front of the guard's hinge)
+    const dk = pit.fg.deck, nodes = [...new Set(hits.map((h) => h.object.userData.fgNode).filter(Boolean))].slice(0, 5);
+    const picks = dk.def.nodes[u.fgNode].picks;
+    return { c: { tip: dk.label(picks) || '', click: (o = {}) => {
+      const b = o.wheel ? (o.wheel > 0 ? 3 : 4) : o.button === 2 || o.shift ? 2 : 0;
+      for (const n of nodes) if (dk.press(dk.def.nodes[n].picks, b)) break;
+    } }, fx: 0, fy: 0 };
+  }
   if (u.panel && hit.uv) { const h = u.panel.hit(hit.uv); if (h) h.panel = u.panel; return h; }
   return null;
 }
 function act(h, opts) {
   if (!h || !h.c.click) return false;
   clicks.push({ tip: typeof h.c.tip === 'function' ? h.c.tip() : h.c.tip, fx: h.fx, fy: h.fy, ...opts });
+  clickCount++;
   if (clicks.length > 20) clicks.shift();
   h.c.click({ fx: h.fx, fy: h.fy, ...opts });
   if (h.panel) h.panel.paint();
@@ -1107,26 +1505,34 @@ export function draw(renderer, gl, { sunB, day, fov, look, lookDown }) {
   const P = FG.pilot;
   if (!P || !P.active) return;
   const kind = kindOf(P.type) || 'a350', nEng = (P.state.spec && P.state.spec.engines) || 2;
-  const key = `${kind}${nEng}`;
-  if (!pits[key]) pits[key] = build(kind, nEng);
+  // (the A320s, A330s and A340s: FlightGear's real deck once its pack has come, the deck built here until then)
+  const real = fgKind(kind);
+  if (real && !fg.pack) fgLoad();
+  const key = `${real && fg.pack ? 'fg-' : ''}${kind}${nEng}`;
+  if (!pits[key]) pits[key] = real && fg.pack ? buildFg(kind, nEng) : build(kind, nEng);
+  const was = pit;
   pit = pits[key];
   useDeck(kind);
+  if (pit.D) { D = pit.D; EYE_X = D.EYE_X; }
+  // (another deck: the eye where the station picked is on this one)
+  if (was && was !== pit && seat.x != null) { seat.x = stationX(at.rear ? 'R' : VIEWS[at.r][at.c][0]); if (seatTo.x != null) seatTo.x = seat.x; }
   hook();
   const now = performance.now();
-  glide(Math.min(0.1, (now - (drawnAt || now)) / 1000));
+  const dt = Math.min(0.1, (now - (drawnAt || now)) / 1000);
+  glide(dt);
   drawnAt = now;
   // (the 3D FCU is the one to use here: the FCU window over the view goes while the deck is shown)
   const fcuEl = document.getElementById('fcu');
   if (fcuEl && !fcuEl.hidden && FG.fcu) { fcuHidden = true; FG.fcu.show(false); }
   paintScreens(now, P);
   if (now - panelsAt > 100) { panelsAt = now; for (const p of pit.panels) p.paint(); }
-  poseControls(P.state);
+  if (pit.fg) fgSync(dt); else poseControls(P.state);
   // light: the sky, the sun, and the cockpit's own (dome, flood, the panels' integral lighting: INT LT)
   const sys = SYS();
   const L = sys ? sys.S.lt : null;
   const d = Math.max(0, Math.min(1, day));
-  pit.hemi.intensity = 0.25 + 0.8 * d;
-  pit.amb.intensity = 0.08 + 0.32 * d;
+  pit.hemi.intensity = 0.3 + 0.75 * d;
+  pit.amb.intensity = 0.12 + 0.28 * d;
   const ex = seat.x == null ? pit.eyeX : seat.x; // (the eye's side: the captain's, the middle, the first officer's)
   if (sunB && d > 0.05) { pit.sun.intensity = 1.8 * d; pit.sun.position.set(sunB[0] * 10 - ex, sunB[1] * 10, sunB[2] * 10); pit.sun.target.position.set(-ex, 0, 0); }
   else pit.sun.intensity = 0;
@@ -1134,6 +1540,7 @@ export function draw(renderer, gl, { sunB, day, fov, look, lookDown }) {
   pit.flood.intensity = L ? 2.2 * L.flood : 0;
   const glow = (0.15 + 0.85 * (1 - d)) * (L ? 0.15 + 0.85 * L.integ : 1);
   for (const m of pit.lit) m.emissive.setScalar(glow * 0.9);
+  if (pit.fg) fgLight(d);
   // camera: the captain's eye, looking a little down the nose, turned with the head
   const W = gl.drawingBufferWidth, H = gl.drawingBufferHeight;
   camera.fov = fov; camera.aspect = W / H; camera.updateProjectionMatrix();
@@ -1201,5 +1608,24 @@ function glide(dt) {
   }
 }
 // (for debugging and test/systems.mjs: FG.cockpit3d.pit is the deck drawn last, project() a cockpit point → NDC)
-FG.cockpit3d = { get pit() { return pit; }, get drawnAt() { return drawnAt; }, clicks, has, draw, eye, project: (p) => new THREE.Vector3(...p).project(camera).toArray(),
+// (where the FlightGear deck's control with that label is, as it stands: its corners' mean, or with `near` the mean
+// of the corners nearest the eye (a hollow guard's middle is in its opening); cockpit space; for the tests)
+function fgSpot(label, near) {
+  if (!pit || !pit.fg || !pit.fg.deck) return null;
+  const dk = pit.fg.deck, pts = [];
+  for (const m of pit.clickables) {
+    if (!m.userData.fgNode || dk.label(dk.def.nodes[m.userData.fgNode].picks) !== label) continue;
+    m.updateWorldMatrix(true, false);
+    const pos = m.geometry.attributes.position;
+    for (let i = 0; i < pos.count; i++) pts.push(new THREE.Vector3().fromBufferAttribute(pos, i).applyMatrix4(m.matrixWorld));
+  }
+  if (!pts.length) return null;
+  let use = pts;
+  if (near) {
+    const eyeP = new THREE.Vector3(-pit.eyeX, 0, 0), d0 = Math.min(...pts.map((p) => p.distanceTo(eyeP)));
+    use = pts.filter((p) => p.distanceTo(eyeP) < d0 + 0.006);
+  }
+  return use.reduce((a, p) => a.add(p), new THREE.Vector3()).divideScalar(use.length).toArray();
+}
+FG.cockpit3d = { get pit() { return pit; }, get clickCount() { return clickCount; }, fgSpot, get drawnAt() { return drawnAt; }, clicks, has, draw, eye, project: (p) => new THREE.Vector3(...p).project(camera).toArray(),
   hitAt(x, y) { const h = pick({ clientX: x, clientY: y }); return h ? { tip: typeof h.c.tip === 'function' ? h.c.tip() : h.c.tip || '', shown: shown() } : { tip: null, shown: shown() }; }, get EYE_X() { const k = FG.pilot && kindOf(FG.pilot.type); return seat.x != null && k ? seat.x : (k ? DECKS[k] : DECKS.a350).EYE_X; }, move }; // (move: the views, Ctrl + arrows) // (the game's view3d.js draws through this)
