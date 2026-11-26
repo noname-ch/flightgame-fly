@@ -211,3 +211,4 @@ body.piloting .view3d-controls { display: none; }
 @media (max-width: 1000px) { .fs-body { grid-template-columns: 1fr 1fr; } .fs-planes { grid-column: 1 / -1; } }
 @media (max-width: 640px) { .fs-body { grid-template-columns: 1fr; } .fs-gallery { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); } }
 
+.fcu-btn.fcu-opt { min-width: 0; padding-left: 4px; padding-right: 4px; font-size: 9px; }

@@ -191,7 +191,8 @@ async function clickControl(panelIdx, find, button = 'left', fy = 0) {
     const mesh = pit.clickables.find((m) => m.userData.panel === panel);
     // the point on the mesh with that uv: search its triangles
     const pos = mesh.geometry.attributes.position, uv = mesh.geometry.attributes.uv, idx = mesh.geometry.index.array;
-    const U = c.x / panel.W, V = 1 - (c.y + fy * c.h / 2) / panel.H;
+    // (a control's x, y are in its module's own pixels; ox, oy: the module's corner on the panel, src/panels.js)
+    const U = (c.x + (c.ox || 0)) / panel.W, V = 1 - (c.y + (c.oy || 0) + fy * c.h / 2) / panel.H;
     for (let t = 0; t < idx.length; t += 3) {
       const [a, b, d] = [idx[t], idx[t + 1], idx[t + 2]];
       const ua = [uv.getX(a), uv.getY(a)], ub = [uv.getX(b), uv.getY(b)], ud = [uv.getX(d), uv.getY(d)];
@@ -333,9 +334,82 @@ try {
 
   step('the overhead page (0): it opens, its switches work; a checkpoint keeps the switches');
   await key('0');
-  if (!await evaluate(() => { const p = document.getElementById('fly-ovhd'); return p && !p.hidden; })) errors.push('0 did not open the overhead page');
-  await evaluate(() => document.querySelector('#fly-ovhd [data-s="nav"][data-v="0"]').click());
+  if (!await evaluate(() => FG.panels.isOpen('overhead'))) errors.push('0 did not open the overhead page');
+  // (a real click on the page's picture: NAV & LOGO's lower half, from ON to OFF; the page is the overhead's modules)
+  const navAt = await evaluate(() => {
+    const p = FG.panels.pagePanel('overhead'), c = p.controls.find((x) => x.tip === 'NAV&LOGO light'), r = p.base.getBoundingClientRect();
+    return { x: r.left + ((c.x + c.ox) / p.W) * r.width, y: r.top + ((c.y + c.oy + c.h * 0.3) / p.H) * r.height };
+  });
+  for (const type of ['mouseMoved', 'mousePressed', 'mouseReleased']) await cmd('Input.dispatchMouseEvent', { type, x: navAt.x, y: navAt.y, button: 'left', clickCount: 1 });
+  await sleep(150);
   if ((await S()).lt.nav !== 0) errors.push('the overhead page\'s NAV & LOGO OFF did nothing');
+  // the new systems: the hydraulics, the fuel and the radios answer their switches
+  const sys2 = await evaluate(() => {
+    const y = FG.systems, out = [];
+    y.set('engPump', 0, 0); y.set('ptu', 0);
+    out.push(['HYD G pump off', y.S.hyd.engPump[0] === 0]);
+    y.set('engPump', 1, 0); y.set('ptu', 1);
+    y.set('xfeed'); out.push(['X FEED', y.S.fuel.xfeed === 1]); y.set('xfeed');
+    out.push(['fuel loaded', y.S.fuel.L + y.S.fuel.R + y.S.fuel.C > 1000]);
+    const was = y.S.radio.vhf.VHF1.stby; y.set('rmpTune', 4, 0); out.push(['RMP tunes', Math.abs(y.S.radio.vhf.VHF1.stby - was - 0.1) < 0.001 || y.S.radio.vhf.VHF1.stby === 118]);
+    y.set('xpdrCode', '7700'); out.push(['squawk', y.S.radio.xpdr.code === '7700']); y.set('xpdrCode', '2000');
+    y.set('ecp', 'HYD'); out.push(['SD page HYD', y.sdPage() === 'HYD']); y.set('ecp', 'HYD');
+    out.push(['navaids loaded', (FG.navdata && FG.navdata.navaids.length) > 5000]);
+    out.push(['VOR auto-tuned', !!(y.S.radio.nav.vor[0])]);
+    return out.filter(([, ok]) => !ok).map(([n]) => n);
+  });
+  if (sys2.length) errors.push(`new systems: ${sys2.join(', ')}`);
+  // every SD page and every ND option draws, every MCDU page shows (no script errors), the systems answer
+  const draws = await evaluate(() => {
+    const out = [], c = document.createElement('canvas'); c.width = 400; c.height = 400; const x = c.getContext('2d');
+    for (const pg of ['BLEED', 'PRESS', 'ELEC', 'HYD', 'FUEL', 'COND', 'DOOR', 'F/CTL', 'CRUISE', 'STS']) { try { if (!FG.systems.sd(x, 400, 400, pg)) out.push(`SD ${pg} not drawn`); } catch (e) { out.push(`SD ${pg}: ${e.message}`); } }
+    for (const o of ['CSTR', 'WPT', 'VOR.D', 'NDB', 'ARPT', null]) { FG.fmgc.F.nd.opt = o; FG.fmgc.F.nd.needle = ['VOR', 'ADF']; try { FG.fmgc.drawNd(x, 0); } catch (e) { out.push(`ND ${o}: ${e.message}`); } }
+    FG.fmgc.F.nd.opt = 'ARPT'; FG.fmgc.F.nd.needle = ['OFF', 'OFF'];
+    FG.systems.S.misc.terrNd[0] = 1; try { FG.fmgc.drawNd(x, 0); } catch (e) { out.push(`ND TERR: ${e.message}`); } FG.systems.S.misc.terrNd[0] = 0;
+    FG.mcdu.show(true);
+    for (const f of ['DATA', 'FUEL PRED', 'SEC F-PLN', 'ATC COMM', 'MCDU MENU', 'PERF', 'RAD NAV', 'INIT', 'F-PLN', 'PROG', 'DIR']) {
+      const b = document.querySelector(`#mcdu [data-f="${f}"]`); if (!b) { out.push(`MCDU key ${f}`); continue; } b.click();
+      const t = document.querySelector('#mcdu .mc-screen').textContent; if (/NOT AVAILABLE/.test(t)) out.push(`MCDU ${f} not available`);
+    }
+    // ATC COMM: an airport's ATIS by datalink (typed in: this flight has no flight plan)
+    document.querySelector('#mcdu [data-f="ATC COMM"]').click();
+    for (const k of 'GVA') document.querySelector(`#mcdu [data-k="${k}"]`).click();
+    document.querySelector('#mcdu [data-lsk="R1"]').click();
+    const atis = document.querySelector('#mcdu .mc-screen').textContent;
+    if (!/ATIS/.test(atis) || !/WIND|QNH/i.test(atis)) out.push(`MCDU ATIS: ${atis.slice(0, 80)}`);
+    FG.mcdu.show(false);
+    return out;
+  });
+  if (draws.length) errors.push(`drawing: ${draws.join('; ')}`);
+  const effects = await evaluate(() => {
+    const y = FG.systems, s = FG.pilot.state, out = [];
+    // all generators off on the ground with the APU off: on the batteries, the F/O's screens dark
+    y.set('gen', 0, 0); y.set('gen', 0, 1); y.set('apuGen', 0); y.step(0.1);
+    if (y.S.elec.level !== 'bat') out.push(`ELEC with no generator: ${y.S.elec.level}`);
+    if (y.screenOn('pfd2')) out.push('the F/O PFD has power on the batteries');
+    if (!y.screenOn('pfd1')) out.push('the captain PFD dark on the batteries');
+    if (!s.altLaw) out.push('no ALTN LAW without AC');
+    y.set('gen', 1, 0); y.set('gen', 1, 1); y.set('apuGen', 1); y.step(0.1);
+    if (y.S.elec.level !== 'normal' || s.altLaw) out.push(`ELEC back: ${y.S.elec.level} altLaw ${s.altLaw}`);
+    // hydraulics: green pump off and the PTU off: green goes, the gear can't come up
+    y.set('engPump', 0, 0); y.set('ptu', 0); for (let k = 0; k < 60; k++) y.step(0.5);
+    if (y.S.hyd.p.G > 1450) out.push(`HYD G with its pump off: ${Math.round(y.S.hyd.p.G)}`);
+    if (s.sysK.gearUp !== 0) out.push('the gear could still come up without green');
+    if (!y.currentCautions().some((c) => /HYD G/.test(c))) out.push('no HYD G caution');
+    y.set('engPump', 1, 0); y.set('ptu', 1); for (let k = 0; k < 30; k++) y.step(0.5);
+    // the IRs: IR 1 off: the captain's ATT flag; ATT HDG CAPT 3 brings it back
+    y.set('irMode', 'OFF', 0); y.step(4);
+    if (y.side(0).att) out.push('IR 1 off: the captain still has the attitude');
+    y.set('attHdg', 'CAPT 3'); if (!y.side(0).att) out.push('ATT HDG CAPT 3 did not give IR 3');
+    y.set('attHdg', 'NORM'); y.set('irMode', 'NAV', 0); s.V = 0; y.step(0.1);
+    if (!(y.S.adirs.ir[0].align > 0)) out.push(`IR 1 back to NAV on the ground does not align (${y.S.adirs.ir[0].align})`);
+    y.S.adirs.ir[0].ok = true; y.S.adirs.ir[0].align = 0;
+    // the fuel burns: the weight comes off
+    const m0 = s.mass, f0 = y.S.fuel.L + y.S.fuel.R + y.S.fuel.C; for (let k = 0; k < 20; k++) y.step(1);
+    if (!(y.S.fuel.L + y.S.fuel.R + y.S.fuel.C < f0) || !(s.mass < m0)) out.push('no fuel burnt');
+    return out;
+  });
+  if (effects.length) errors.push(`effects: ${effects.join('; ')}`);
   await key('0');
   await key('z');
   await evaluate(() => FG.systems.set('nav', 1));

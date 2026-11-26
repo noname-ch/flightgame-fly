@@ -17,6 +17,9 @@
   'use strict';
   const G = FG.game;
   const KT = 0.514444, FT = 0.3048, DEG = Math.PI / 180, R_E = 6371008.8, G0 = 9.80665;
+  // what the aircraft's systems leave of the flaps' and gear's speed, the thrust, the brakes and the steering, and the
+  // drag and the stall margin ice takes (s.sysK, set each frame by src/aircraft.js)
+  const SYSK0 = { flap: 1, gearUp: 1, gearDn: 1, thrust: 1, cd: 0, stallDrop: 0, brake: 1, steer: 1 };
   const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
   const wrap360 = (d) => ((d % 360) + 360) % 360;
   const wrap180 = (d) => ((((d % 360) + 540) % 360) - 180);
@@ -220,9 +223,9 @@
   // the conventional types, it can stall, overbank and pull as hard as the stick asks.
   const isFbw = () => s.spec.law === 'airbus'; // (the Airbuses and the Global 7500: normal law with hard protections)
   const isAirbus = () => s.spec.maker === 'Airbus'; // (LVR CLB, alpha floor)
-  const airbus = () => isFbw() && s.limiter && !(s.dmg && s.dmg.elev); // (a broken elevator: the computers drop to direct law)
+  const airbus = () => isFbw() && s.limiter && !(s.dmg && s.dmg.elev) && !s.altLaw; // (a broken elevator: the computers drop to direct law; s.altLaw: src/aircraft.js, hydraulics or power lost)
   const lim = () => s.limiter || !s.spec.prot; // (protections on; a type without any is always "on")
-  const lawName = () => (s.dmg && s.dmg.elev && isFbw() ? s.spec.directName : lim() ? s.spec.lawName : isFbw() ? s.spec.directName : 'PROT OFF');
+  const lawName = () => (s.dmg && s.dmg.elev && isFbw() ? s.spec.directName : s.altLaw && isFbw() ? 'ALTN LAW' : lim() ? s.spec.lawName : isFbw() ? s.spec.directName : 'PROT OFF');
   const lastConf = () => CONF.length - 1;
   const CAMS = ['chase', 'cockpit', 'wing', 'flyby'];
 
@@ -682,14 +685,15 @@
   function physics(dt) {
     if (s.tumble) { tumbleStep(dt); return; }
     const sp = s.spec, m = s.mass, W = m * G0;
+    const K = s.sysK || SYSK0; // (what the aircraft's systems allow: src/aircraft.js)
     const at = atmo(s.h);
     const V = Math.max(0, s.V);
     const q = 0.5 * at.rho * V * V;
     const M = V / at.a;
-    s.flapPos += clamp(s.conf - s.flapPos, -dt / 7, dt / 7); // about 7 s a notch
+    s.flapPos += clamp(s.conf - s.flapPos, -dt * K.flap / 7, dt * K.flap / 7); // about 7 s a notch (slower, or stuck, without hydraulics)
     const c = confAt(s.flapPos);
     if (sp.gear === 'fixed') { s.gearDown = true; s.gear = 1; }
-    s.gear += clamp((s.gearDown ? 1 : 0) - s.gear, -dt / 10, dt / 10);
+    s.gear += clamp((s.gearDown ? 1 : 0) - s.gear, -dt * K.gearUp / 10, dt * K.gearDn / 10); // (up needs hydraulics; down falls by gravity)
     // engines: jets spool up slowly from idle, faster once turning; propellers answer at once. Reverse once the
     // sleeves are open (or the blades past fine pitch)
     const props = sp.engine === 'prop' || sp.engine === 'piston';
@@ -729,7 +733,7 @@
       fr += thrustFrac(s.n1[i]);
     }
     s.thrFrac = fr / s.n1.length;
-    let T = engineThrust(sp, at.rho, V, M) * fr;
+    let T = engineThrust(sp, at.rho, V, M) * fr * K.thrust;
     T *= 1 - (1 + sp.rev) * s.rev; // (reversed: part of it backwards)
     // ground spoilers: up on the ground with the thrust levers at idle (armed, or in reverse) after touchdown, and
     // for a rejected take-off above 72 kt
@@ -739,7 +743,7 @@
     // aerodynamics
     const clBase = CL_BASE + c.cl0;
     // (a delta wing has no sharp stall: the vortices over it go on lifting, less and less, up to about 35°)
-    const aStall = sp.delta ? 35 : (c.clmax - clBase) / CL_A;
+    const aStall = (sp.delta ? 35 : (c.clmax - clBase) / CL_A) - K.stallDrop; // (ice on the wing: it stalls earlier)
     s.aProt = sp.delta ? sp.shakerA : aStall - 2;
     // stalled, the flow breaks away from the wing: about a third of the lift goes within half a second, and it stays
     // gone until the angle of attack is well back below the stall (stallAmt, set by conventionalLaw)
@@ -749,7 +753,7 @@
       const aK = (c.clmax - clBase) / CL_A; // (the lift slope halves past here: about 23°)
       CL = clBase + CL_A * Math.min(s.alpha, aK) + 0.5 * CL_A * clamp(s.alpha - aK, 0, aStall - aK) - 0.04 * Math.max(0, s.alpha - aStall);
     } else {
-      CL = Math.min(clBase + CL_A * s.alpha, c.clmax);
+      CL = Math.min(clBase + CL_A * s.alpha, c.clmax - K.stallDrop * CL_A);
       if (s.alpha > aStall) CL -= 0.04 * (s.alpha - aStall);
     }
     CL *= 1 - 0.35 * s.stallAmt;
@@ -765,7 +769,7 @@
     s.dmgRoll = ((lostR * lostArm(dm.cut[1]) - lostL * lostArm(dm.cut[0])) * CLw / 4) / CL_AIL; // (in full aileron throws)
     s.ailAuth = (ailLeft(dm.cut[0]) + ailLeft(dm.cut[1])) / 2;
     CL *= 1 - (lostL + lostR) / 2;
-    const CD = CD0 + c.cd + 0.012 * ((dm.cut[0] ? 1 : 0) + (dm.cut[1] ? 1 : 0)) + sp.gearCd * s.gear + 0.05 * spoil + K_IND * Math.pow(CL - sp.kMin, 2) + waveDrag(sp, M) + 0.2 * s.stallAmt
+    const CD = CD0 + c.cd + 0.012 * ((dm.cut[0] ? 1 : 0) + (dm.cut[1] ? 1 : 0)) + sp.gearCd * s.gear + 0.05 * spoil + K_IND * Math.pow(CL - sp.kMin, 2) + waveDrag(sp, M) + 0.2 * s.stallAmt + K.cd
       // (past the stall the wing is more and more a flat plate across the air: a huge air brake at 30-40°)
       + (sp.delta ? 0 : 1.8 * Math.max(0, Math.sin(s.alpha * DEG) ** 2 - Math.sin(aStall * DEG) ** 2));
     // buffet: the airframe shakes as the flow starts to break away, hard once stalled (looks only: pose())
@@ -812,14 +816,14 @@
       if (s.theta > sp.tail && !s.tail) { s.tail = true; say('TAIL STRIKE', 'red', 5000); speak('tail strike'); }
       if (s.theta < sp.tail - 2) s.tail = false;
       const N = Math.max(0, W - L);
-      const fric = (0.015 + 0.4 * s.brake) * N;
+      const fric = (0.015 + 0.4 * s.brake * K.brake) * N;
       let a = (T - D) / m;
       if (V > 0.05) a -= fric / m;
       else if (Math.abs(T - D) < fric) a = 0;
       s.V = Math.max(0, V + a * dt);
       // nose wheel steering: up to 60° when slow, a few degrees at speed (the rudder pedals)
       const steerIn = Math.abs(s.rud) > Math.abs(s.roll) ? s.rud : s.roll;
-      const most = 60 + (6 - 60) * clamp((V - 5) / 30, 0, 1);
+      const most = (60 + (6 - 60) * clamp((V - 5) / 30, 0, 1)) * (V < 30 * KT ? K.steer : 1); // (the tiller needs the nose wheel steering; the pedals at speed are the rudder)
       psiRate = ((s.V / sp.wheelbase) * Math.tan(steerIn * most * DEG)) / DEG;
       // (after a landing it only leaves the ground again when pulled off: a touch-and-go, not a bounce of the model)
       if (L > W && s.V > vRot * 0.7 && (!s.landed || s.stick > 0.05)) {
@@ -1649,7 +1653,7 @@
     }
     s.prevAgl = s.onGround ? 0 : a;
     if (FG.systems) w.unshift(...FG.systems.warnings()); // (fires and engines: src/systems.js)
-    return w;
+    return FG.systems && FG.systems.filter ? FG.systems.filter(w) : w; // (the GPWS switched off: src/aircraft.js)
   }
 
   // ---------- each frame (view3d calls it from its render loop) ----------

@@ -93,7 +93,9 @@
     if (f === '↑' || f === '↓') { st.scroll = Math.max(0, st.scroll + (f === '↓' ? 1 : -1)); return; }
     if (f === '←' || f === '→') return;
     if (f === 'AIRPORT') { st.page = 'F-PLN'; st.scroll = F.plan ? Math.max(0, F.plan.wps.length - 4) : 0; return; }
-    if (['INIT', 'F-PLN', 'DIR', 'PROG', 'PERF', 'RAD NAV'].includes(f)) { st.page = f; st.scroll = f === 'F-PLN' && F.plan ? Math.max(0, F.plan.active - 1) : 0; return; }
+    if (['INIT', 'F-PLN', 'DIR', 'PROG', 'PERF', 'RAD NAV', 'DATA', 'FUEL PRED', 'SEC F-PLN', 'ATC COMM', 'MCDU MENU'].includes(f)) {
+      st.page = f; st.scroll = f === 'F-PLN' && F.plan ? Math.max(0, F.plan.active - 1) : 0; st.perfPh = null; return;
+    }
     st.msg = 'NOT AVAILABLE';
   }
   const take = () => { const v = st.pad.trim(); st.pad = ''; return v; };
@@ -110,7 +112,7 @@
           if (!m) return formatErr();
           if (!G.airportByCode[m[1]] || !G.airportByCode[m[2]]) { st.msg = 'NOT IN DATABASE'; return; }
           newPlan(m[1], m[2]);
-        } else if (id === 'L3') st.fltNbr = take().slice(0, 8);
+        } else if (id === 'L3') { st.fltNbr = take().slice(0, 8); F.fltNbr = st.fltNbr; }
         else if (id === 'L6') {
           const v = take().replace(/^FL/, ''); const fl = Number(v.split('/')[0]);
           if (!(fl >= 50 && fl <= 410)) return formatErr();
@@ -155,6 +157,63 @@
         }
         break;
       }
+      case 'PERF': {
+        const P1 = F.perf, v = take(), to = perfPhase() === 'TAKEOFF';
+        if (id === 'R6') { st.perfPh = to ? 'APPR' : 'TAKEOFF'; return; }
+        const num = (lo, hi) => { if (v === 'CLR') return null; const x = Number(v); if (!(x >= lo && x <= hi)) { formatErr(); return undefined; } return x; };
+        const put = (k, lo, hi) => { const x = num(lo, hi); if (x !== undefined) P1[k] = x; };
+        if (to) {
+          if (id === 'L1') put('v1', 90, 200); else if (id === 'L2') put('vr', 90, 200); else if (id === 'L3') put('v2', 90, 210);
+          else if (id === 'R4') put('flex', 0, 75); else if (v) notAllowed();
+        } else {
+          if (id === 'L1') put('qnh', 900, 1100); else if (id === 'R2') put('mda', 0, 20000); else if (id === 'R3') put('dh', 0, 1000);
+          else if (id === 'R4') { P1.ldgConf = P1.ldgConf === 'FULL' ? '3' : 'FULL'; if (FG.systems) FG.systems.set('gpwsLdg3', P1.ldgConf === '3' ? 1 : 0); }
+          else if (v) notAllowed();
+        }
+        break;
+      }
+      case 'RAD NAV': {
+        const v = take(), sys = FG.systems;
+        if (!sys) return;
+        const slot = { L1: ['vor', 0], R1: ['vor', 1], L5: ['adf', 0], R5: ['adf', 1] }[id];
+        if (!slot) { if (v) notAllowed(); return; }
+        sys.set(slot[0], v === 'CLR' || !v ? null : v, slot[1]);
+        break;
+      }
+      case 'DATA': {
+        const v = take();
+        if (id === 'L1') st.page = 'POS MON'; else if (id === 'L2') st.page = 'IRS MON'; else if (id === 'L4') st.page = 'A/C STATUS';
+        else if (id === 'R1' || id === 'R2') { st.look = v ? (id === 'R1' ? findFix(v) : FG.radio && FG.radio.findNavaid(v)) : null; st.lookKind = id === 'R1' ? 'WAYPOINT' : 'NAVAID'; if (v && !st.look) st.msg = 'NOT IN DATABASE'; else st.page = 'LOOKUP'; }
+        break;
+      }
+      case 'POS MON': case 'IRS MON': case 'A/C STATUS': case 'LOOKUP': case 'AIDS': case 'CFDS': case 'ATIS':
+        if (id === 'L6') st.page = { 'POS MON': 'DATA', 'IRS MON': 'DATA', 'A/C STATUS': 'DATA', LOOKUP: 'DATA', AIDS: 'MCDU MENU', CFDS: 'MCDU MENU', ATIS: 'ATC COMM' }[st.page];
+        break;
+      case 'SEC F-PLN': {
+        if (id === 'L1') { if (!F.plan) return notAllowed(); F.secPlan = structuredClone(F.plan); st.msg = 'SEC F-PLN: ACTIVE COPIED'; }
+        else if (id === 'L4') { F.secPlan = null; st.msg = 'SEC F-PLN DELETED'; }
+        else if (id === 'R3') {
+          if (!F.secPlan) return notAllowed();
+          const a = F.plan; F.plan = F.secPlan; F.secPlan = a ? structuredClone(a) : null; M.predict(F.plan); st.msg = 'SEC F-PLN ACTIVATED';
+        }
+        break;
+      }
+      case 'ATC COMM': {
+        const p = F.plan;
+        const code = id === 'L1' ? p && p.from : id === 'R1' ? p && p.to : null;
+        if (id === 'L1' || id === 'R1') {
+          const v = take(), c = v || code;
+          const a = c && G.airportByCode[c];
+          if (!a || !FG.radio) { st.msg = 'NOT IN DATABASE'; return; }
+          const at = FG.radio.atis(a);
+          if (!at) { st.msg = 'NO ATIS'; return; }
+          st.atis = { code: c, text: at.text, letter: at.letter }; st.page = 'ATIS'; st.scroll = 0;
+        }
+        break;
+      }
+      case 'MCDU MENU':
+        if (id === 'L1') st.page = 'INIT'; else if (id === 'L2') st.page = 'ATC COMM'; else if (id === 'L3') st.page = 'AIDS'; else if (id === 'L4') st.page = 'CFDS';
+        break;
       default:
         if (st.pad) notAllowed();
     }
@@ -190,6 +249,11 @@
     if (s.onGround) { F.latArm = 'NAV'; F.hdgMgd = true; F.altMgd = true; if (F.vertArm === 'OP CLB') F.vertArm = 'CLB'; }
     st.msg = `F-PLN ${from}/${to}: ${plan.wps.length} WPTS`;
   }
+
+  const perfPhase = () => st.perfPh || (F.phase === 'TAKEOFF' || (s.onGround && !s.landed) ? 'TAKEOFF' : 'APPR');
+  // a text broken into the screen's 24 columns
+  const wrap = (text, n = 24) => { const out = []; let line = ''; for (const w of text.split(/\s+/)) { if ((line + ' ' + w).trim().length > n) { out.push(line.trim()); line = w; } else line += ' ' + w; } if (line.trim()) out.push(line.trim()); return out; };
+  const ll = (lat, lon) => `${String(Math.floor(Math.abs(lat))).padStart(2, '0')}°${(Math.abs(lat) % 1 * 60).toFixed(1).padStart(4, '0')}${lat >= 0 ? 'N' : 'S'}/${String(Math.floor(Math.abs(lon))).padStart(3, '0')}°${(Math.abs(lon) % 1 * 60).toFixed(1).padStart(4, '0')}${lon >= 0 ? 'E' : 'W'}`;
 
   // ---------- pages ----------
   // a page: title, then six pairs of lines (label, data); each line a left and a right part [text, colour]
@@ -266,46 +330,173 @@
         break;
       }
       case 'PERF': {
-        const api = FG.pilot.api, sp = s.spec || {};
-        if (F.phase === 'TAKEOFF') {
+        const api = FG.pilot.api, sp = s.spec || {}, P1 = F.perf;
+        const val = (x, dflt) => (x != null ? [String(x), C.c] : [String(dflt), C.g]);
+        if (perfPhase() === 'TAKEOFF') {
           title = 'TAKE OFF';
-          lab(0, ' V1', 'RWY');
-          dat(0, String(sp.vr - 5), C.c, s.startOpts && s.startOpts.end ? s.startOpts.end.name : '--', C.g);
-          lab(1, ' VR', 'TO SHIFT');
-          dat(1, String(sp.vr), C.c, '[M][  ]*', C.c);
-          lab(2, ' V2', 'FLAPS/THS');
-          dat(2, String(sp.vr + 5), C.c, `${api.conf()[sp.toConf] ? api.conf()[sp.toConf].name : '-'}/UP0.5`, C.c);
+          lab(0, ' V1', 'RWY'); const v1 = val(P1.v1, sp.vr - 5); dat(0, v1[0], v1[1], s.startOpts && s.startOpts.end ? s.startOpts.end.name : '--', C.g);
+          lab(1, ' VR', 'TO SHIFT'); const vr = val(P1.vr, sp.vr); dat(1, vr[0], vr[1], '[M][  ]*', C.c);
+          lab(2, ' V2', 'FLAPS/THS'); const v2 = val(P1.v2, sp.vr + 5); dat(2, v2[0], v2[1], `${api.conf()[sp.toConf] ? api.conf()[sp.toConf].name : '-'}/UP0.5`, C.c);
           lab(3, 'TRANS ALT', 'FLEX TO TEMP');
-          dat(3, '5000', C.c, '---°', C.c);
+          const oat = FG.systems && FG.systems.oatC ? Math.round(FG.systems.oatC(s.groundH)) : 15;
+          dat(3, '5000', C.c, P1.flex != null ? `${P1.flex}°` : `[ ]° (OAT ${oat})`, P1.flex != null ? C.c : C.a);
           lab(4, 'THR RED/ACC', 'ENG OUT ACC');
           dat(4, '1500/1500', C.c, '1500', C.c);
+          lab(5, '', 'NEXT ');
+          dat(5, '', C.w, 'PHASE>', C.w);
         } else {
           title = 'APPR';
           const last = api.conf().length - 1;
+          const rw = F.plan && F.plan.to && FG.radio ? FG.radio.metar(G.airportByCode[F.plan.to] || { lat: s.lat, lon: s.lon }) : null;
           lab(0, ' QNH', 'FINAL');
-          dat(0, '1013', C.c, F.plan && F.plan.arrEnd ? `ILS${F.plan.arrEnd.name}` : '---', C.g);
-          lab(1, ' TEMP', 'VLS');
-          dat(1, '15°', C.c, String(Math.round(api.vls(last))), C.g);
-          lab(2, 'MAG WIND', 'VAPP');
-          dat(2, '000°/000', C.c, String(Math.round(api.vls(last) + 5)), C.c);
-          lab(3, 'TRANS FL', 'LDG CONF');
-          dat(3, 'FL050', C.c, api.conf()[last] ? `CONF ${api.conf()[last].name}*` : '-', C.c);
-          lab(4, ' GREEN DOT', '');
-          dat(4, String(Math.round(api.vls(0) + 25)), C.g);
+          dat(0, P1.qnh != null ? String(P1.qnh) : rw ? `[ ] (${rw.qnh})` : '[    ]', P1.qnh != null ? C.c : C.a, F.plan && F.plan.arrEnd ? `ILS${F.plan.arrEnd.name}` : '---', C.g);
+          lab(1, ' TEMP', 'BARO');
+          dat(1, rw ? `${rw.temp}°` : '15°', C.c, P1.mda != null ? String(P1.mda) : '[    ]', P1.mda != null ? C.c : C.c);
+          lab(2, 'MAG WIND', 'RADIO');
+          dat(2, rw ? `${String(Math.round(rw.w.windFrom)).padStart(3, '0')}°/${String(rw.w.windKt).padStart(3, '0')}` : '000°/000', C.c, P1.dh != null ? String(P1.dh) : '[    ]', C.c);
+          lab(3, 'VLS', 'LDG CONF');
+          dat(3, String(Math.round(api.vls(last))), C.g, P1.ldgConf === '3' && last > 1 ? `CONF ${api.conf()[last - 1].name}*` : api.conf()[last] ? `CONF ${api.conf()[last].name}*` : '-', C.c);
+          lab(4, ' GREEN DOT', 'VAPP');
+          dat(4, String(Math.round(api.vls(0) + 25)), C.g, String(Math.round(api.vls(last) + 5)), C.c);
+          lab(5, '', 'PREV ');
+          dat(5, '', C.w, 'PHASE>', C.w);
         }
+        break;
+      }
+      case 'FUEL PRED': {
+        title = 'FUEL PRED';
+        const Fu = FG.systems && FG.systems.S && FG.systems.S.fuel;
+        if (!Fu) { dat(2, ' NOT AVAILABLE', C.a); break; }
+        const fob = Fu.L + Fu.C + Fu.R;
+        const ff = (FG.systems.S.eng || []).reduce((a, e, i) => a + FG.systems.ffOf(i), 0) * 3600; // kg/h
+        const gs = Math.max(120, s.V * Math.cos(s.gamma) / KT);
+        const dist = M.dtg() || 0, hrs = dist / gs;
+        const efob = Math.max(0, fob - Math.max(ff, s.mass * 0.025) * hrs);
+        const eta = new Date(Date.now() + hrs * 3600e3);
+        const t2 = (n) => (n / 1000).toFixed(1);
+        lab(0, ' AT', 'UTC   EFOB');
+        dat(0, p ? p.to : '----', C.g, `${String(eta.getUTCHours()).padStart(2, '0')}${String(eta.getUTCMinutes()).padStart(2, '0')}  ${t2(efob)}`, efob < s.mass * 0.03 ? C.a : C.g);
+        lab(2, ' GW   /CG', 'FOB');
+        dat(2, `${t2(s.mass)} /25.0`, C.g, `${t2(fob)}`, C.g);
+        lab(3, ' RTE RSV/%', 'FF');
+        dat(3, `${t2(fob * 0.05)} /5.0`, C.c, `${Math.round(ff)} KG/H`, C.g);
+        lab(4, ' FINAL/TIME', 'F.USED');
+        dat(4, `${t2(s.mass * 0.032 * 0.5)} /0030`, C.c, t2(Fu.used), C.g);
+        lab(5, ' EXTRA/TIME', '');
+        const extra = efob - s.mass * 0.032 * 0.5;
+        dat(5, `${t2(Math.max(0, extra))} /${String(Math.max(0, Math.round(extra / Math.max(1, ff) * 60))).padStart(4, '0')}`, extra < 0 ? C.a : C.g);
+        break;
+      }
+      case 'DATA':
+        title = 'DATA INDEX';
+        lab(0, ' POSITION', 'WAYPOINTS'); dat(0, '<MONITOR', C.w, '[     ]>', C.c);
+        lab(1, ' IRS', 'NAVAIDS'); dat(1, '<MONITOR', C.w, '[     ]>', C.c);
+        lab(3, ' A/C', ''); dat(3, '<STATUS', C.w);
+        dat(5, ' (IDENT, THEN R1 OR R2)', C.w);
+        break;
+      case 'POS MON': {
+        title = 'POSITION MONITOR';
+        const pos = ll(s.lat, s.lon);
+        lab(0, ' FMGC1', ''); dat(0, pos, C.g);
+        lab(1, ' FMGC2', ''); dat(1, pos, C.g);
+        const D = FG.systems && FG.systems.S && FG.systems.S.adirs;
+        lab(2, ' GPIRS', ''); dat(2, pos, C.g);
+        lab(3, ' IRS1/IRS2/IRS3', '');
+        dat(3, D ? D.ir.map((r) => (r.mode === 'NAV' && r.ok ? 'NAV' : r.mode === 'ATT' ? 'ATT' : r.align > 0 ? 'ALIGN' : 'INVAL')).join('  ') : 'NAV  NAV  NAV', C.g);
+        dat(5, '<RETURN', C.w);
+        break;
+      }
+      case 'IRS MON': {
+        title = 'IRS MONITOR';
+        const D = FG.systems && FG.systems.S && FG.systems.S.adirs;
+        (D ? D.ir : [0, 1, 2]).forEach((r, k) => {
+          lab(k, ` IRS${k + 1}`, D && D.adr[k] ? 'ADR ON' : 'ADR OFF');
+          dat(k, D ? `${r.mode}${r.align > 0 ? ` ALIGN TTN ${Math.ceil(r.align / 60)}` : r.align < 0 ? ' ALIGN FAULT' : r.ok ? '' : ' NOT ALIGNED'}` : 'NAV', r.ok || !D ? C.g : C.a);
+        });
+        lab(3, ' ATT HDG / AIR DATA', '');
+        dat(3, D ? `${D.attHdg} / ${D.airData}` : 'NORM / NORM', C.c);
+        dat(5, '<RETURN', C.w);
+        break;
+      }
+      case 'A/C STATUS':
+        title = (s.spec && s.spec.name || 'A/C').toUpperCase().slice(0, 24);
+        lab(0, ' ENG', ''); dat(0, `${s.spec ? s.spec.engines : 2} x ${(s.spec && s.spec.engine || 'JET').toUpperCase()}`, C.g);
+        lab(1, ' ACTIVE NAV DATA BASE', ''); dat(1, ' OURAIRPORTS (PD)', C.c);
+        lab(2, ' NAVAIDS', ''); dat(2, ` ${(FG.navdata && FG.navdata.navaids.length) || 0}`, C.g);
+        lab(3, ' CHG CODE', 'IDLE/PERF'); dat(3, '[   ]', C.c, '+0.0/+0.0', C.g);
+        dat(5, '<RETURN', C.w);
+        break;
+      case 'LOOKUP': {
+        const n = st.look;
+        title = st.lookKind;
+        if (!n) { dat(2, ' NOT IN DATABASE', C.a); dat(5, '<RETURN', C.w); break; }
+        lab(0, ' IDENT', st.lookKind === 'NAVAID' ? 'FREQ' : ''); dat(0, n.id, C.g, n.freq ? (n.kind === 'N' ? `${n.freq}` : n.freq.toFixed(2)) : '', C.g);
+        lab(1, ' LAT/LONG', ''); dat(1, ll(n.lat, n.lon), C.g);
+        lab(2, ' CLASS', 'DIST'); dat(2, n.kind === 'N' ? 'NDB' : n.kind === 'VD' ? 'VOR-DME' : n.kind === 'D' ? 'DME' : n.kind === 'V' ? 'VOR' : 'WAYPOINT', C.g, `${Math.round(gcDist({ lat: s.lat, lon: s.lon }, n))}NM`, C.g);
+        if (n.name || n.town) { lab(3, ' NAME', ''); dat(3, (n.name || n.town).toUpperCase().slice(0, 24), C.g); }
+        dat(5, '<RETURN', C.w);
+        break;
+      }
+      case 'SEC F-PLN': {
+        title = 'SEC INDEX';
+        const q = F.secPlan;
+        lab(0, '', ''); dat(0, '<COPY ACTIVE', C.w);
+        lab(1, ' SEC F-PLN', ''); dat(1, q ? `${q.from || 'PPOS'}/${q.to} ${q.wps.length} WPTS` : '----', q ? C.g : C.w);
+        lab(2, '', ''); dat(2, '', C.w, q ? 'ACTIVATE SEC*' : '', C.a);
+        dat(3, q ? '<DELETE SEC' : '', C.w);
+        break;
+      }
+      case 'ATC COMM':
+        title = 'ATC COMM / ATIS';
+        lab(0, ' DEP ATIS', 'ARR ATIS');
+        dat(0, `<${(p && p.from) || '[  ]'}`, C.c, `${(p && p.to) || '[  ]'}>`, C.c);
+        dat(2, ' (OR TYPE AN AIRPORT)', C.w);
+        lab(3, ' DATALINK', ''); dat(3, ' ACARS: AVAIL', C.g);
+        break;
+      case 'ATIS': {
+        const a = st.atis;
+        title = `${a ? a.code : ''} ATIS ${a ? a.letter : ''}`;
+        const lines = a ? wrap(a.text) : [];
+        for (let k = 0; k < 10; k++) { const ln = lines[st.scroll + k]; if (!ln) break; if (k % 2) dat((k - 1) / 2, ln, C.g); else lab(k / 2, ln); }
+        dat(5, '<RETURN  (↑↓ SCROLL)', C.w);
+        break;
+      }
+      case 'MCDU MENU':
+        title = 'MCDU MENU';
+        dat(0, '<FMGC', C.g); dat(1, '<ATSU', C.w); dat(2, '<AIDS', C.w); dat(3, '<CFDS', C.w);
+        break;
+      case 'AIDS': {
+        title = 'AIDS  ENGINE REPORT';
+        const SY = FG.systems && FG.systems.S;
+        (s.n1 || []).slice(0, 4).forEach((n, i) => { lab(i, ` ENG ${i + 1}`, 'FF KG/H'); dat(i, `N1 ${n.toFixed(1)}  ${SY && SY.eng[i] && SY.eng[i].run ? 'RUN' : 'OFF'}`, C.g, SY ? String(Math.round(FG.systems.ffOf(i) * 3600)) : '--', C.g); });
+        if (SY && SY.air) { lab(4, ' CAB ALT', 'CAB V/S'); dat(4, `${Math.round(SY.air.cabAlt / 10) * 10}`, C.g, `${Math.round(SY.air.cabVs / 10) * 10}`, C.g); }
+        dat(5, '<RETURN', C.w);
+        break;
+      }
+      case 'CFDS': {
+        title = 'CFDS  LAST LEG REPORT';
+        const SY = FG.systems && FG.systems.S;
+        const items = SY ? [...FG.systems.currentWarnings(), ...FG.systems.currentCautions(), ...SY.log.map((l) => l.text)] : [];
+        if (!items.length) dat(1, ' NO FAULT', C.g);
+        items.slice(st.scroll, st.scroll + 9).forEach((x, k) => { const t2 = String(x).toUpperCase().slice(0, 24); if (k % 2) dat((k - 1) / 2, t2, C.a); else lab(k / 2, t2); });
+        dat(5, '<RETURN', C.w);
         break;
       }
       case 'RAD NAV': {
         title = 'RADIO NAV';
+        const N = FG.radio && FG.radio.S ? FG.radio.S.nav : { vor: [null, null], vorMan: [false, false], adf: [null, null] };
+        const fq = (n) => (n ? (n.kind === 'N' ? String(n.freq) : n.freq.toFixed(2)) : '');
         lab(0, 'VOR1/FREQ', 'FREQ/VOR2');
-        dat(0, '[ ]/[  . ]', C.c, '[  . ]/[ ]', C.c);
+        dat(0, N.vor[0] ? `${N.vor[0].id}/${fq(N.vor[0])}` : '[ ]/[  . ]', N.vorMan[0] ? C.c : C.g, N.vor[1] ? `${fq(N.vor[1])}/${N.vor[1].id}` : '[  . ]/[ ]', N.vorMan[1] ? C.c : C.g);
+        lab(1, 'CRS', 'CRS'); dat(1, '[ ]', C.c, '[ ]', C.c);
         const e = (F.plan && F.plan.arrEnd) || (F.ilsNow && F.ilsNow.e);
         lab(2, 'LS /FREQ', '');
-        dat(2, e ? `I${e.code}${e.name}/---.--` : '[  ]/[  . ]', C.c);
+        dat(2, e ? `I${e.code}${e.name}/---.--` : '[  ]/[  . ]', C.g);
         lab(3, 'CRS', '');
-        dat(3, e ? `${pad3(e.course)}` : '[ ]', C.c);
+        dat(3, e ? `${pad3(e.course)}` : '[ ]', C.g);
         lab(4, 'ADF1/FREQ', 'FREQ/ADF2');
-        dat(4, '[ ]/[  . ]', C.c, '[  . ]/[ ]', C.c);
+        dat(4, N.adf[0] ? `${N.adf[0].id}/${fq(N.adf[0])}` : '[ ]/[  . ]', C.c, N.adf[1] ? `${fq(N.adf[1])}/${N.adf[1].id}` : '[  . ]/[ ]', C.c);
+        dat(5, ' VOR: IDENT (CLR = AUTO)', C.w);
         break;
       }
       default:

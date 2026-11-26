@@ -62,7 +62,10 @@
     fcu: { hdg: 0, alt: 5000, altInc: 1000, vs: 0, fpa: 0, trkFpa: false, spdPreset: null, hdgPreset: null, presetAt: 0, visible: true },
     lat: null, latArm: null, vert: null, vertArm: null, appr: false, locBtn: false, exped: false,
     altMgd: false, hdgMgd: false, plan: null, cmd: { bank: null, gamma: null }, abrk: null, abrkOn: false,
-    nd: { mode: 'ARC', range: 40, arpt: true }, phase: 'PREFLIGHT', capVs: 1000, msgs: [],
+    // the ND: mode, range, the one EFIS option on (CSTR WPT VOR.D NDB ARPT, or null), the bearing needles (ADF / OFF / VOR)
+    nd: { mode: 'ARC', range: 40, arpt: true, opt: 'ARPT', needle: ['OFF', 'OFF'] }, phase: 'PREFLIGHT', capVs: 1000, msgs: [],
+    // the MCDU's PERF page: take-off speeds and FLEX temperature, the approach's QNH, minimums and landing flaps
+    perf: { v1: null, vr: null, v2: null, flex: null, qnh: null, mda: null, dh: null, ldgConf: 'FULL' }, fltNbr: '',
   };
   const s = P.state;
   const apOn = () => F.ap1 || F.ap2;
@@ -351,15 +354,21 @@
   function commands() {
     const sp = s.spec, alt = altFt(), agl = A.agl();
     const hdgTo = (trk, most = 25) => clamp(wrap180(trk - s.psi) * 1.3, -most, most);
+    // the ground track now: the heading and the drift the wind gives (a crosswind: the nose points into it); NAV and the
+    // localizer steer the track, so a crosswind doesn't leave the aircraft beside the line
+    const w = s.wind, Vg = Math.max(30, s.V);
+    const wTo = w ? (w.from + 180) * DEG : 0, wMs = w ? w.kt * KT : 0;
+    const trkNow = wrap360(s.psi + Math.atan2(wMs * Math.sin(wTo - s.psi * DEG), Vg + wMs * Math.cos(wTo - s.psi * DEG)) / DEG);
+    const trkTo = (trk, most = 25) => clamp(wrap180(trk - trkNow) * 1.3, -most, most);
     let bank = null, gamma = null;
     const l = F.ilsNow;
     const locTrack = () => (l ? wrap360(l.e.course + clamp(locDev(l) / 1852 * 40, -30, 30)) : s.psi);
     switch (F.lat) {
       case 'RWY': case 'RWY TRK': bank = s.onGround ? null : hdgTo(F.rwyTrk || s.psi, 10); break;
       case 'HDG': case 'TRK': bank = hdgTo(F.fcu.hdg); break;
-      case 'NAV': bank = hdgTo(navTrack()); break;
-      case 'LOC*': case 'LOC': bank = hdgTo(locTrack()); break;
-      case 'LAND': bank = hdgTo(locTrack(), 10); break;
+      case 'NAV': bank = trkTo(navTrack()); break;
+      case 'LOC*': case 'LOC': bank = trkTo(locTrack()); break;
+      case 'LAND': bank = trkTo(locTrack(), 10); break;
       case 'FLARE': bank = hdgTo(locTrack(), 3); break;
       default:
     }
@@ -435,8 +444,28 @@
   }
 
   // ---------- each physics step ----------
+  // The callouts the PERF page's numbers give: V1 and rotate on the take-off, "minimum" at the decision height or
+  // minimum descent altitude on the approach (with the sound on).
+  let lastIas = 0, lastAgl = 0;
+  function perfCalls() {
+    const ias = A.ias(), agl = A.agl() / FT, sound = FG.sound && FG.sound.on;
+    const P1 = F.perf;
+    if (s.onGround && !s.landed) {
+      if (P1.v1 && lastIas < P1.v1 && ias >= P1.v1 && sound) A.speak('V one');
+      if (P1.vr && lastIas < P1.vr && ias >= P1.vr && sound) A.speak('rotate');
+    } else if (!s.onGround && A.vsFpm() < -100) {
+      const min = P1.dh != null ? agl : P1.mda != null ? altFt() : null;
+      const at = P1.dh != null ? P1.dh : P1.mda;
+      const prev = P1.dh != null ? lastAgl : lastAlt;
+      if (min != null && prev > at + 100 && min <= at + 100 && sound) A.speak('one hundred above');
+      if (min != null && prev > at && min <= at) { if (sound) A.speak('minimum'); say('MINIMUM', 'amber', 2500); }
+    }
+    lastIas = ias; lastAgl = agl; lastAlt = altFt();
+  }
+  let lastAlt = 0;
   function control(dt) {
     if (!F.on || s.crashed) return;
+    perfCalls();
     modes(dt);
     const cmd = commands();
     F.cmd = cmd;
@@ -493,6 +522,7 @@
     const key = n === 2 ? 'ap2' : 'ap1', other = n === 2 ? 'ap1' : 'ap2';
     if (F[key]) { F[key] = false; if (!apOn()) { say('AP OFF', 'red', 2500); FG.fmgc.sounds.cavalry(); } return; }
     if (s.onGround || A.agl() < 100) { say('AP: engages from 100 ft after take-off. The FD bars show where to fly until then.', 'amber', 4000); return; }
+    if (FG.systems && FG.systems.apOk && !FG.systems.apOk()) { say('AP: not available (power, flight controls in alternate law, or the IRs / ADRs)', 'amber', 4000); FG.fmgc.sounds.cavalry(); return; }
     if (!F.lat || F.lat === 'RWY') { setLat(F.fcu.trkFpa ? 'TRK' : 'HDG'); F.fcu.hdg = Math.round(s.psi); F.hdgMgd = false; }
     if (!F.vert) setVert(F.fcu.trkFpa ? 'FPA' : 'V/S', { vs: A.vsFpm(), fpa: s.gamma / DEG });
     const both = F.appr && (F.vertArm === 'G/S' || ['G/S*', 'G/S', ...LANDING].includes(F.vert));
@@ -620,7 +650,13 @@
       case 'ALTINC': F.fcu.altInc = F.fcu.altInc === 1000 ? 100 : 1000; break;
       case 'FD': F.fd = !F.fd; break;
       case 'LS': F.ls = !F.ls; break;
-      case 'ARPT': F.nd.arpt = !F.nd.arpt; break;
+      case 'ARPT': press('ND ARPT'); break;
+      case 'ND CSTR': case 'ND WPT': case 'ND VOR.D': case 'ND NDB': case 'ND ARPT': {
+        const o = btn.slice(3);
+        F.nd.opt = F.nd.opt === o ? null : o; // (one at a time, as on the EFIS panel)
+        F.nd.arpt = F.nd.opt === 'ARPT';
+        break;
+      }
       case 'NDMODE': F.nd.mode = { ARC: 'ROSE', ROSE: 'PLAN', PLAN: 'ARC' }[F.nd.mode]; break;
       case 'RNG+': F.nd.range = Math.min(320, F.nd.range * 2); break;
       case 'RNG-': F.nd.range = Math.max(10, F.nd.range / 2); break;
@@ -691,7 +727,7 @@
   function managedSpeed() {
     if (!F.on || !s.spec) return null;
     const sp = s.spec, alt = altFt();
-    if (F.vert === 'SRS') return sp.vr + 15; // (V2 + 10)
+    if (F.vert === 'SRS') return F.perf.v2 ? F.perf.v2 + 10 : sp.vr + 15; // (V2 + 10)
     if (F.vert === 'EXP CLB') return A.vls(0) + 25; // (green dot)
     if (F.vert === 'EXP DES') return A.vmo() - 10;
     // (flaps out, or the gear on a type without flaps: pilot.js's own speeds for the configuration)
@@ -777,8 +813,117 @@
   }
 
   // ---------- ND (navigation display, 324 × 324) ----------
+  // ---------- ND layers ----------
+  // EGPWS terrain: heights round the aircraft looked up every few seconds (FG.flat), painted by how high they are
+  // against the aircraft: red more than 2000 ft above, amber up to 500 ft below, green to 2000 ft below
+  let terr = null, terrBusy = false;
+  function drawTerrain(c, here, up, range, xy, ppn) {
+    const now = performance.now();
+    if (FG.flat && !terrBusy && (!terr || now - terr.at > 3000 || terr.range !== range || gcDist(here, terr.c) > range / 8)) {
+      terrBusy = true;
+      const N = 26, pts = [], ll = [];
+      for (let i = 0; i < N; i++) for (let j = 0; j < N; j++) {
+        const ex = (i / (N - 1) * 2 - 1) * range, ny = (j / (N - 1) * 2 - 1) * range;
+        const d = Math.hypot(ex, ny); if (d > range * 1.05) continue;
+        const p = gcMove(here, wrap360(Math.atan2(ex, ny) / R), d);
+        pts.push([p.lat, p.lon]); ll.push(p);
+      }
+      const z = range <= 20 ? 11 : range <= 80 ? 10 : 9;
+      FG.flat.heightsAt(pts, z).then((hs) => { terr = { at: performance.now(), range, c: here, pts: ll, h: hs, cell: (2 * range / (N - 1)) }; }, () => {}).finally(() => { terrBusy = false; });
+    }
+    if (!terr) return;
+    const alt = s.h, sz = terr.cell * ppn;
+    terr.pts.forEach((p, k) => {
+      const h = terr.h[k];
+      if (h == null || !isFinite(h)) return;
+      const rel = (h - alt) / FT;
+      const col = rel > 2000 ? 'rgba(220,40,30,0.75)' : rel > -500 ? 'rgba(220,170,0,0.6)' : rel > -2000 ? 'rgba(40,170,60,0.5)' : null;
+      if (!col) return;
+      const [x, y] = xy(p);
+      c.fillStyle = col;
+      for (let q = 0; q < 6; q++) { const ox = ((q * 37) % 10) / 10 - 0.5, oy = ((q * 53) % 10) / 10 - 0.5; c.fillRect(x + ox * sz, y + oy * sz, 1.6, 1.6); }
+    });
+  }
+  // VOR.D / NDB: the navaids (src/data/navdata.js); WPT: the towns the MCDU knows as waypoints
+  let optList = null, optAt = 0, optKey = '';
+  function drawOpt(c, here, range, xy) {
+    const now = performance.now(), key = `${F.nd.opt}|${range}`;
+    if (!optList || now - optAt > 2000 || key !== optKey) {
+      optAt = now; optKey = key;
+      if (F.nd.opt === 'WPT') {
+        optList = [];
+        for (const t of FG.data.towns || []) {
+          const name = Array.isArray(t) ? t[0] : t.name, p = Array.isArray(t) ? { lat: t[2], lon: t[3] } : t;
+          if (Math.abs(p.lat - s.lat) > range / 55) continue;
+          const d = gcDist(here, p);
+          if (d < range * 1.05) optList.push({ id: ident(name), lat: p.lat, lon: p.lon, pop: (Array.isArray(t) ? t[4] : t.pop) || 0, kind: 'W' });
+        }
+        optList.sort((a, b) => b.pop - a.pop); optList = optList.slice(0, 40);
+      } else optList = FG.radio ? FG.radio.navaidsNear(here, range * 1.05, F.nd.opt === 'NDB' ? 'N' : 'V VD D').slice(0, 50) : [];
+    }
+    c.font = '10px ui-monospace, monospace'; c.textAlign = 'left'; c.lineWidth = 1.3;
+    for (const n of optList) {
+      const [x, y] = xy(n);
+      c.strokeStyle = MAGENTA; c.fillStyle = MAGENTA;
+      c.beginPath();
+      if (n.kind === 'N') { c.moveTo(x, y - 6); c.lineTo(x + 5, y + 4); c.lineTo(x - 5, y + 4); c.closePath(); }
+      else if (n.kind === 'W') { c.moveTo(x, y - 4); c.lineTo(x + 4, y); c.lineTo(x, y + 4); c.lineTo(x - 4, y); c.closePath(); }
+      else {
+        if (n.kind !== 'D') { c.moveTo(x - 6, y); c.lineTo(x + 6, y); c.moveTo(x, y - 6); c.lineTo(x, y + 6); }
+        if (n.kind !== 'V') { c.moveTo(x + 4, y); c.arc(x, y, 4, 0, 7); }
+      }
+      c.stroke();
+      c.fillText(n.id, x + 7, y + 7);
+    }
+  }
+  // TCAS: other traffic hollow white, proximate filled white, TA amber circles, RA red squares; relative altitude
+  // in hundreds of feet with an arrow when climbing or descending
+  function drawTraffic(c, here, up, xy) {
+    const T = FG.radio ? FG.radio.traffic : [];
+    c.font = '9px ui-monospace, monospace'; c.textAlign = 'center';
+    for (const t of T) {
+      const [x, y] = xy(t);
+      const col = t.level === 3 ? '#ff3b30' : t.level === 2 ? '#ffb000' : WHITE;
+      c.strokeStyle = col; c.fillStyle = col; c.lineWidth = 1.5;
+      c.beginPath();
+      if (t.level === 3) c.rect(x - 5, y - 5, 10, 10);
+      else if (t.level === 2) c.arc(x, y, 5, 0, 7);
+      else { c.moveTo(x, y - 6); c.lineTo(x + 5, y); c.lineTo(x, y + 6); c.lineTo(x - 5, y); c.closePath(); }
+      if (t.level >= 1) c.fill(); else c.stroke();
+      const rel = Math.round(t.rel / 100);
+      c.fillText(`${rel >= 0 ? '+' : '-'}${String(Math.abs(rel)).padStart(2, '0')}`, x, rel >= 0 ? y - 11 : y + 12);
+      if (Math.abs(t.vs) > 500) c.fillText(t.vs > 0 ? '↑' : '↓', x + 10, y);
+    }
+  }
+  // the bearing needles: VOR (white) or ADF (green), single for 1, double for 2, and their stations at the bottom
+  function drawNeedles(c, here, up, cx, cy, rad, W, H) {
+    const R2 = FG.radio && FG.radio.S;
+    if (!R2) return;
+    for (let k = 0; k < 2; k++) {
+      const sel = F.nd.needle[k];
+      if (sel === 'OFF') continue;
+      const st = sel === 'VOR' ? R2.nav.vor[k] : R2.nav.adf[k];
+      const col = sel === 'VOR' ? WHITE : GREEN;
+      c.textAlign = k ? 'right' : 'left'; c.font = '10px ui-monospace, monospace'; c.fillStyle = col;
+      const lx = k ? W - 8 : 8;
+      c.fillText(`${sel}${k + 1}`, lx, H - 40);
+      if (!st) { c.fillText('---', lx, H - 28); continue; }
+      const to = FG.radio.toStation(st);
+      c.fillText(`${st.id}${st.kind === 'VD' || st.kind === 'D' ? `  ${to.d < 100 ? to.d.toFixed(1) : Math.round(to.d)}` : ''}`, lx, H - 28);
+      if (to.d > (st.kind === 'N' ? 80 : 160)) continue; // (out of range: no needle)
+      const a = (to.brg - up) * R, dx = Math.sin(a), dy = -Math.cos(a);
+      c.strokeStyle = col; c.lineWidth = 1.6;
+      const r0 = rad * 0.92, r1 = rad * 0.55;
+      for (const off of k ? [-3, 3] : [0]) {
+        const ox = -dy * off, oy = dx * off;
+        c.beginPath(); c.moveTo(cx + dx * r0 + ox, cy + dy * r0 + oy); c.lineTo(cx + dx * r1 + ox, cy + dy * r1 + oy);
+        c.moveTo(cx - dx * r1 + ox, cy - dy * r1 + oy); c.lineTo(cx - dx * r0 + ox, cy - dy * r0 + oy); c.stroke();
+      }
+      c.beginPath(); c.moveTo(cx + dx * r0, cy + dy * r0); c.lineTo(cx + dx * (r0 - 10) - dy * 5, cy + dy * (r0 - 10) + dx * 5); c.lineTo(cx + dx * (r0 - 10) + dy * 5, cy + dy * (r0 - 10) - dx * 5); c.closePath(); c.fillStyle = col; c.fill();
+    }
+  }
   let ndAirports = null, ndAirAt = 0;
-  function drawNd(c) {
+  function drawNd(c, side = 0) {
     const W = 324, H = 324;
     c.save();
     c.fillStyle = 'rgba(0,0,0,0.9)'; c.beginPath(); c.roundRect ? c.roundRect(0, 0, W, H, 10) : c.rect(0, 0, W, H); c.fill();
@@ -795,6 +940,9 @@
       return [cx + Math.sin(b) * d * ppn, cy - Math.cos(b) * d * ppn];
     };
     c.textBaseline = 'middle';
+    // the terrain (TERR ON ND) under everything else
+    const SY = FG.systems && FG.systems.S;
+    if (SY && SY.misc && (SY.misc.terrNd[side] || SY.misc.terrNd[1 - side]) && !plan) drawTerrain(c, here, up, range, xy, ppn);
     // compass
     c.strokeStyle = WHITE; c.fillStyle = WHITE; c.lineWidth = 1.2; c.font = '11px ui-monospace, Consolas, monospace'; c.textAlign = 'center';
     c.beginPath(); c.arc(cx, cy, rad, 0, Math.PI * 2); c.stroke();
@@ -832,6 +980,8 @@
         c.fillText(a.code, x + 7, y + 6);
       }
     }
+    // the EFIS option: navaids, waypoints
+    if (F.nd.opt === 'VOR.D' || F.nd.opt === 'NDB' || F.nd.opt === 'WPT') drawOpt(c, here, range, xy);
     // the flight plan: green legs, the active waypoint white
     const p = F.plan;
     if (p) {
@@ -850,6 +1000,7 @@
         c.strokeStyle = col; c.fillStyle = col; c.lineWidth = 1.5;
         c.beginPath(); c.moveTo(x, y - 5); c.lineTo(x + 5, y); c.lineTo(x, y + 5); c.lineTo(x - 5, y); c.closePath(); c.stroke();
         c.fillText(w.id, x + 8, y - 6);
+        if (F.nd.opt === 'CSTR' && w.alt != null) { c.fillStyle = MAGENTA; c.fillText(w.alt >= 10000 ? `FL${Math.round(w.alt / 100)}` : String(Math.round(w.alt / 10) * 10), x + 8, y + 6); }
       }
       // T/C and T/D
       for (const [d, lbl] of [[p.toc, 'T/C'], [p.tod, 'T/D']]) {
@@ -868,7 +1019,11 @@
       const e = l.e; const [x1, y1] = xy(e); const far = gcMove(e, wrap360(e.course + 180), 15); const [x2, y2] = xy(far);
       c.strokeStyle = MAGENTA; c.setLineDash([6, 4]); c.lineWidth = 1.5; c.beginPath(); c.moveTo(x1, y1); c.lineTo(x2, y2); c.stroke(); c.setLineDash([]);
     }
+    // TCAS: the other aircraft (src/radio.js)
+    drawTraffic(c, here, up, xy);
     c.restore(); c.save();
+    // the bearing needles (EFIS ADF / VOR switches; src/radio.js tunes them)
+    if (!plan) drawNeedles(c, here, up, cx, cy, rad, W, H);
     // the aircraft
     c.strokeStyle = '#ffd60a'; c.lineWidth = 3;
     if (plan) {
@@ -895,7 +1050,9 @@
       c.fillText(`${String(eta.getHours()).padStart(2, '0')}${String(eta.getMinutes()).padStart(2, '0')}`, W - 8, 43);
     }
     c.textAlign = 'left'; c.fillStyle = WHITE; c.font = '10px ui-monospace, monospace';
-    c.fillText(`${mode === 'ROSE' ? 'ROSE NAV' : mode}  ${range} NM${F.nd.arpt ? '  ARPT' : ''}`, 8, H - 10);
+    c.fillText(`${mode === 'ROSE' ? 'ROSE NAV' : mode}  ${range} NM${F.nd.opt ? `  ${F.nd.opt}` : ''}`, 8, H - 10);
+    const RS = FG.radio && FG.radio.S;
+    if (RS && RS.xpdr.tcas !== 'STBY' && RS.xpdr.mode !== 'STBY' && !plan) { c.fillStyle = RS.xpdr.tcas === 'TA' ? '#4fd6ff' : WHITE; c.fillText(RS.xpdr.tcas === 'TA' ? 'TA ONLY' : 'TCAS', 8, H - 24); }
     if (l && F.ls) { c.textAlign = 'right'; c.fillStyle = MAGENTA; c.fillText(`ILS ${l.e.code}${l.e.name} ${(l.d / 1852).toFixed(1)}`, W - 8, H - 10); }
     c.restore();
   }

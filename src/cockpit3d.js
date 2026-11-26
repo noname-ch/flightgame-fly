@@ -21,15 +21,18 @@
 // station; the captain's eye is at x = -EYE_X.
 import * as THREE from 'three';
 
-// (the systems: lights, fire, APU, engines; loaded with this file's own version)
-import(`./systems.js${new URL(import.meta.url).search}`).catch((e) => console.warn('systems.js', e));
+// (the panels' modules and layouts, then the systems: lights, fire, APU, engines; then the aircraft's other systems
+// and the radios, which plug into them; all with this file's own version, so a browser never mixes old and new)
+const V = new URL(import.meta.url).search;
+const { canvas, texture, panelArt, tools, LIT, annTest, annDim, surface, deckOf } = await import(`./panels.js${V}`);
+import(`./systems.js${V}`).then(() => Promise.all([import(`./aircraft.js${V}`), import(`./radio.js${V}`)])).catch((e) => console.warn('systems', e));
 
 // ---------- the decks' sizes ----------
 const DECKS = {
   a350: { HALF: 1.36, ROOF: 0.50, REAR: -1.75, FLOOR: -1.32, EYE_X: 0.53, wsY: 1.15, wsK: 0.294, wsZ: 0.767, scr: 1.19 },
   a320: { HALF: 1.12, ROOF: 0.46, REAR: -1.50, FLOOR: -1.25, EYE_X: 0.50, wsY: 0.98, wsK: 0.33, wsZ: 0.80, scr: 0.98 },
 };
-const kindOf = (type) => (/^A35|^A38/i.test(type || '') ? 'a350' : /^A3[234]/i.test(type || '') ? 'a320' : null);
+const kindOf = deckOf; // (which deck a type flies with: src/panels.js)
 export const has = (type) => !!kindOf(type);
 // The current deck's numbers (set by build()).
 let D = DECKS.a350, HALF = D.HALF, ROOF = D.ROOF, REAR = D.REAR, FLOOR = D.FLOOR;
@@ -59,515 +62,16 @@ const P_ = () => FG.pilot;
 const SYS = () => (FG.systems && FG.systems.ready && FG.systems.ready() ? FG.systems : null);
 const FM = () => (FG.fmgc && FG.fmgc.on ? FG.fmgc : null);
 
-// ---------- canvas pictures of the panels ----------
-function canvas(w, h) {
-  const c = document.createElement('canvas');
-  c.width = w; c.height = h;
-  return c;
-}
-function texture(c) {
-  const t = new THREE.CanvasTexture(c);
-  t.colorSpace = THREE.SRGBColorSpace;
-  t.anisotropy = 8;
-  return t;
-}
-// A panel's picture: its face (`base`) and what glows on it at night (`glow`: legends, lit buttons).
-function panelArt(wPx, hPx, paint, bg = '#4b5058') {
-  const base = canvas(wPx, hPx), glow = canvas(wPx, hPx);
-  const b = base.getContext('2d'), g = glow.getContext('2d');
-  b.fillStyle = bg; b.fillRect(0, 0, wPx, hPx);
-  g.fillStyle = '#000'; g.fillRect(0, 0, wPx, hPx);
-  paint(b, g, wPx, hPx);
-  return { map: texture(base), glow: texture(glow) };
-}
-// Annunciator lights: TEST lights them all, DIM dims them.
-const annTest = () => { const S = SYS(); return !!(S && S.S.lt.ann === 'TEST'); };
-const annDim = () => { const S = SYS(); return !!(S && S.S.lt.ann === 'DIM'); };
-const LIT = { amber: '#ffb000', red: '#ff3b30', blue: '#6fc8ff', white: '#ffffff', green: '#30d158' };
-// The tools for painting panels: Airbus pushbuttons (square, dark, a lit legend), knobs, number windows, labels.
-function tools(b, g) {
-  const T = {
-    label(x, y, text, size = 11, color = '#e9edf1', align = 'center') {
-      for (const c of [b, g]) {
-        c.font = `600 ${size}px system-ui, sans-serif`; c.textAlign = align; c.textBaseline = 'middle';
-        c.fillStyle = c === b ? color : '#cfd8e2';
-        c.fillText(text, x, y);
-      }
-    },
-    plate(x, y, w, h, color = '#3d4249') { // a sub-panel, with its screws
-      b.fillStyle = color; b.fillRect(x, y, w, h);
-      b.strokeStyle = 'rgba(0,0,0,0.55)'; b.lineWidth = 2; b.strokeRect(x + 1, y + 1, w - 2, h - 2);
-      b.strokeStyle = 'rgba(255,255,255,0.08)'; b.beginPath(); b.moveTo(x + 2, y + h - 2); b.lineTo(x + 2, y + 2); b.lineTo(x + w - 2, y + 2); b.stroke();
-      b.fillStyle = '#9aa1aa';
-      for (const [sx, sy] of [[x + 5, y + 5], [x + w - 5, y + 5], [x + 5, y + h - 5], [x + w - 5, y + h - 5]]) { b.beginPath(); b.arc(sx, sy, 1.6, 0, 7); b.fill(); }
-    },
-    // a section's title on a panel: white letters with a line either side
-    title(x, y, w, text, size = 12) {
-      T.label(x + w / 2, y, text, size, '#ffffff');
-      b.font = `600 ${size}px system-ui, sans-serif`;
-      const tw = b.measureText(text).width / 2 + 6;
-      b.strokeStyle = '#e9edf1'; b.lineWidth = 1.2;
-      b.beginPath(); b.moveTo(x + 6, y); b.lineTo(x + w / 2 - tw, y); b.moveTo(x + w / 2 + tw, y); b.lineTo(x + w - 6, y); b.stroke();
-    },
-    pb(x, y, s, top = '', bot = '', lit = null) { // pushbutton, legends unlit (or the bottom lit blue)
-      T.pb2(x, y, s, top ? { t: top, col: 'amber', on: false } : null, bot ? { t: bot, col: 'blue', on: !!lit } : null);
-    },
-    // pushbutton with its two legends { t, col (a LIT name), on }
-    pb2(x, y, s, top, bot, w = s) {
-      b.fillStyle = '#16181b'; b.fillRect(x - w / 2, y - s / 2, w, s);
-      b.strokeStyle = '#6c737c'; b.lineWidth = 1.2; b.strokeRect(x - w / 2 + 0.5, y - s / 2 + 0.5, w - 1, s - 1);
-      b.fillStyle = '#0b0c0e'; b.fillRect(x - w / 2 + 3, y - s / 2 + 3, w - 6, s - 6);
-      const f = Math.max(6, Math.min(s * 0.24, (w * 1.6) / Math.max(4, Math.max((top && top.t.length) || 0, (bot && bot.t.length) || 0))));
-      const test = annTest(), dim = annDim();
-      for (const [L, dy] of [[top, -0.2], [bot, 0.2]]) {
-        if (!L || !L.t) continue;
-        const on = L.on || test;
-        for (const c of [b, g]) {
-          c.font = `700 ${f}px system-ui, sans-serif`; c.textAlign = 'center'; c.textBaseline = 'middle';
-          if (on) {
-            c.globalAlpha = dim ? 0.6 : 1;
-            c.fillStyle = LIT[L.col] || LIT.white;
-            if (c === b) { c.shadowColor = LIT[L.col] || '#fff'; c.shadowBlur = 6; }
-          } else c.fillStyle = c === b ? '#33383f' : '#101214';
-          c.fillText(L.t, x, y + s * dy);
-          c.globalAlpha = 1; c.shadowBlur = 0;
-          if (L.box && on) { c.strokeStyle = LIT[L.col]; c.lineWidth = 1.5; c.strokeRect(x - w * 0.38, y + s * dy - f * 0.62, w * 0.76, f * 1.24); }
-        }
-      }
-    },
-    knob(x, y, r, color = '#2a2d31', angle = 0) {
-      b.fillStyle = '#0d0e10'; b.beginPath(); b.arc(x, y + 1.5, r + 1.5, 0, 7); b.fill();
-      const grd = b.createRadialGradient(x - r * 0.3, y - r * 0.3, r * 0.1, x, y, r);
-      grd.addColorStop(0, '#5d636b'); grd.addColorStop(1, color);
-      b.fillStyle = grd; b.beginPath(); b.arc(x, y, r, 0, 7); b.fill();
-      b.strokeStyle = '#d9dee4'; b.lineWidth = 1.5; b.beginPath();
-      b.moveTo(x + Math.sin(angle) * r * 0.2, y - Math.cos(angle) * r * 0.2); b.lineTo(x + Math.sin(angle) * r * 0.9, y - Math.cos(angle) * r * 0.9); b.stroke();
-    },
-    window(x, y, w, h, text, dot) { // a number window (orange LCD digits, as the FCU's)
-      b.fillStyle = '#050505'; b.fillRect(x - w / 2, y - h / 2, w, h);
-      for (const c of [b, g]) {
-        c.font = `600 ${h * 0.72}px ui-monospace, monospace`; c.textAlign = 'center'; c.textBaseline = 'middle';
-        c.fillStyle = c === b ? '#f2b35a' : '#f0a640'; c.fillText(text, x - (dot ? h * 0.25 : 0), y + 1);
-        if (dot) { c.beginPath(); c.arc(x + w / 2 - h * 0.35, y, h * 0.14, 0, 7); c.fill(); }
-      }
-    },
-    // a toggle switch from below: the slot, the lever's knob at position `at` of n (0 = top)
-    toggle(x, y, s, at = 0, n = 2) {
-      b.fillStyle = '#16181b'; b.fillRect(x - s * 0.3, y - s * 0.55, s * 0.6, s * 1.1);
-      b.strokeStyle = '#5c636c'; b.lineWidth = 1; b.strokeRect(x - s * 0.3 + 0.5, y - s * 0.55 + 0.5, s * 0.6 - 1, s * 1.1 - 1);
-      const ky = y - s * 0.32 + (n > 1 ? (at / (n - 1)) * s * 0.64 : 0);
-      b.fillStyle = '#8a9099'; b.fillRect(x - s * 0.06, Math.min(y, ky), s * 0.12, Math.abs(ky - y));
-      const grd = b.createRadialGradient(x - s * 0.05, ky - s * 0.05, 1, x, ky, s * 0.2);
-      grd.addColorStop(0, '#f1f4f7'); grd.addColorStop(1, '#8b939c');
-      b.fillStyle = grd; b.beginPath(); b.arc(x, ky, s * 0.19, 0, 7); b.fill();
-    },
-    rows(x0, y0, cols, rows, dx, dy, s, legends) { // a grid of pushbuttons
-      let i = 0;
-      for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
-        const L = legends[i++ % legends.length];
-        T.pb(x0 + c * dx, y0 + r * dy, s, L[0], L[1], L[2]);
-      }
-    },
-  };
-  return T;
-}
-
-// ---------- panels with controls ----------
-// A panel painted from its controls: the picture is painted again when what they show changes (sig()); a click
-// at (u, v) on its mesh finds the control there. Controls: { x, y, w, h (canvas px, centred), draw(T, b, g),
-// sig(), click({ fx, fy, button, wheel, shift }) (fx, fy: -1 … 1 across the control), tip }.
-function livePanel(W, H, bg, paintBase, controls) {
-  const base = canvas(W, H), glow = canvas(W, H);
-  const b = base.getContext('2d'), g = glow.getContext('2d');
-  const p = {
-    W, H, controls, map: texture(base), glow: texture(glow), sig: null,
-    paint(force) {
-      const sig = controls.map((c) => (c.sig ? c.sig() : '')).join('|') + (annTest() ? 'T' : annDim() ? 'D' : '');
-      if (!force && sig === p.sig) return;
-      p.sig = sig;
-      b.fillStyle = bg; b.fillRect(0, 0, W, H);
-      g.fillStyle = '#000'; g.fillRect(0, 0, W, H);
-      const T = tools(b, g);
-      paintBase(T, b, g, W, H);
-      for (const c of controls) if (c.draw) c.draw(T, b, g);
-      p.map.needsUpdate = true; p.glow.needsUpdate = true;
-    },
-    hit(uv) {
-      const x = uv.x * W, y = (1 - uv.y) * H;
-      for (const c of controls) {
-        if (!c.click) continue;
-        if (Math.abs(x - c.x) <= c.w / 2 && Math.abs(y - c.y) <= c.h / 2) return { c, fx: (x - c.x) / (c.w / 2), fy: (y - c.y) / (c.h / 2) };
-      }
-      return null;
-    },
-  };
-  p.paint(true);
-  return p;
-}
-const J = (v) => JSON.stringify(v);
-// A pushbutton: top / bot give { t, col, on } now.
-function pbC(x, y, s, { top, bot, click, tip, w }) {
-  return { x, y, w: w || s, h: s, tip, click, sig: () => J([top && top(), bot && bot()]), draw: (T) => T.pb2(x, y, s, top && top(), bot && bot(), w || s) };
-}
-// A toggle switch with its positions (top first) [[value, label], ...]; get() the value now, set(v).
-function swC(x, y, s, label, opts, get, set, tip) {
-  return {
-    x: x + s * 0.4, y, w: s * 2.2, h: s * 1.6, tip: tip || label, sig: () => J(get()),
-    draw(T) {
-      const at = Math.max(0, opts.findIndex((o) => String(o[0]) === String(get())));
-      T.toggle(x, y, s, at, opts.length);
-      opts.forEach(([, l], i) => T.label(x + s * 0.42, y - s * 0.32 + (opts.length > 1 ? (i / (opts.length - 1)) * s * 0.64 : 0), l, Math.max(7, s * 0.22), '#e9edf1', 'left'));
-      if (label) T.label(x + s * 0.3, y - s * 0.95, label, Math.max(8, s * 0.26));
-    },
-    click({ fy }) {
-      const at = Math.max(0, opts.findIndex((o) => String(o[0]) === String(get())));
-      const to = Math.max(0, Math.min(opts.length - 1, at + (fy < 0 ? -1 : 1)));
-      if (to !== at) set(opts[to][0]);
-    },
-  };
-}
-// A rotary selector: positions round its top (left to right) [[value, label], ...].
-function rotC(x, y, r, label, opts, get, set, tip) {
-  const ang = (i) => (opts.length > 1 ? -0.9 + (1.8 * i) / (opts.length - 1) : 0);
-  return {
-    x, y: y - r * 0.4, w: r * 4.2, h: r * 3.6, tip: tip || label, sig: () => J(get()),
-    draw(T) {
-      const at = Math.max(0, opts.findIndex((o) => String(o[0]) === String(get())));
-      opts.forEach(([, l], i) => T.label(x + Math.sin(ang(i)) * r * 1.75, y - Math.cos(ang(i)) * r * 1.6, l, Math.max(7, r * 0.42)));
-      T.knob(x, y, r, '#2a2d31', ang(at));
-      if (label) T.label(x, y + r * 1.45, label, Math.max(8, r * 0.48));
-    },
-    click({ fx, wheel }) {
-      const at = Math.max(0, opts.findIndex((o) => String(o[0]) === String(get())));
-      const d = wheel ? (wheel > 0 ? 1 : -1) : fx < 0 ? -1 : 1;
-      const to = Math.max(0, Math.min(opts.length - 1, at + d));
-      if (to !== at) set(opts[to][0]);
-    },
-  };
-}
-// A continuous knob (lighting): 0 … 1; a click on its left half turns it down, on the right half up.
-function dimC(x, y, r, label, get, set) {
-  return {
-    x, y, w: r * 3, h: r * 3, tip: `${label}: click left / right or the wheel`, sig: () => J(Math.round(get() * 20)),
-    draw(T) { T.knob(x, y, r, '#2a2d31', -2.3 + 4.6 * get()); T.label(x, y + r * 1.6, label, Math.max(8, r * 0.5)); T.label(x - r * 1.2, y + r * 0.9, 'OFF', 7); T.label(x + r * 1.2, y + r * 0.9, 'BRT', 7); },
-    click({ fx, wheel }) { set(Math.max(0, Math.min(1, get() + (wheel ? wheel * 0.1 : fx < 0 ? -0.25 : 0.25)))); },
-  };
-}
-// The big red FIRE pushbutton of an engine or the APU, under its clear guard.
-function fireC(x, y, w, h, name, lit, pushed, click) {
-  return {
-    x, y, w, h, tip: `${name} FIRE pushbutton: push to cut its fuel and arm the agents`, click, sig: () => J([lit(), pushed(), annTest()]),
-    draw(T, b, g) {
-      const on = lit() || annTest(), dn = pushed();
-      b.fillStyle = '#16181b'; b.fillRect(x - w / 2 - 4, y - h / 2 - 4, w + 8, h + 8);
-      b.fillStyle = on ? '#d0261a' : '#4a1410'; b.fillRect(x - w / 2, y - h / 2 + (dn ? 3 : 0), w, h - (dn ? 3 : 0));
-      if (on) { g.fillStyle = '#ff3b30'; g.fillRect(x - w / 2, y - h / 2, w, h); }
-      for (const c of [b, g]) {
-        c.font = `800 ${h * 0.24}px system-ui, sans-serif`; c.textAlign = 'center'; c.textBaseline = 'middle';
-        c.fillStyle = c === b ? (on ? '#fff3e8' : '#d9a39b') : (on ? '#ffffff' : '#200806');
-        c.fillText(name, x, y - h * 0.18); c.fillText('FIRE', x, y + h * 0.16);
-      }
-      T.label(x, y + h * 0.41, 'PUSH', Math.max(7, h * 0.14), '#e9edf1');
-      // the guard (clear, its frame)
-      b.strokeStyle = 'rgba(220,230,240,0.55)'; b.lineWidth = 2; b.strokeRect(x - w / 2 - 6, y - h / 2 - 6, w + 12, h + 12);
-    },
-  };
-}
-// An FCU button: its name, and the green bar lit when it is on.
-function fcuBtnC(x, y, w, h, label, lit, click, tip) {
-  return {
-    x, y, w, h, tip: tip || label, click, sig: () => J(lit()),
-    draw(T, b, g) {
-      b.fillStyle = '#25282c'; b.fillRect(x - w / 2, y - h / 2, w, h);
-      b.strokeStyle = '#5c636c'; b.lineWidth = 1; b.strokeRect(x - w / 2 + 0.5, y - h / 2 + 0.5, w - 1, h - 1);
-      const on = lit() || annTest();
-      b.fillStyle = on ? '#30d158' : '#123018'; b.fillRect(x - w * 0.3, y - h * 0.32, w * 0.6, h * 0.12);
-      if (on) { g.fillStyle = '#30d158'; g.fillRect(x - w * 0.3, y - h * 0.32, w * 0.6, h * 0.12); }
-      const lines = label.split('\n');
-      lines.forEach((l, i) => T.label(x, y + h * 0.12 + (i - (lines.length - 1) / 2) * h * 0.26, l, Math.max(7, Math.min(h * 0.3, (w * 1.5) / l.length)), '#e9edf1'));
-    },
-  };
-}
-// An FCU knob: wheel turns, click pushes, right-click pulls; a click on its left or right edge turns it a step.
-function fcuKnobC(x, y, r, name) {
-  let ang = 0;
-  return {
-    x, y, w: r * 2.6, h: r * 2.6, tip: `${name.toUpperCase()} knob: wheel turns · click PUSH · right-click PULL · click its edge: a step`, sig: () => J(ang),
-    draw(T) { T.knob(x, y, r, '#2a2d31', ang); },
-    click({ fx, button, wheel, shift }) {
-      const M = FM();
-      if (!M) return;
-      if (wheel) { M.turn(name, wheel > 0 ? 1 : -1, shift); ang += wheel > 0 ? 0.26 : -0.26; }
-      else if (button === 2) M.pull(name);
-      else if (Math.abs(fx) > 0.6) { M.turn(name, fx > 0 ? 1 : -1, shift); ang += fx > 0 ? 0.26 : -0.26; }
-      else M.push(name);
-    },
-  };
-}
-function winC(x, y, w, h, text) {
-  return { x, y, w, h, sig: () => J(text()), draw: (T) => { const [t, dot] = text(); T.window(x, y, w, h, t, dot); } };
-}
-
-// ---------- the glareshield (both decks): master warning / caution, EFIS panels, FCU ----------
-function glareshieldPanel(span) {
-  const W = 2560, H = 128;
-  const px = (x) => ((x + span) / (2 * span)) * W; // (cockpit x → canvas x)
-  const F = () => (FG.fmgc ? FG.fmgc.F : null);
-  const s = () => P_().state;
-  const press = (b) => { const M = FM(); if (M) M.press(b); else if (FG.fmgc) FG.fmgc.press(b); };
-  const pad = (n, w) => String(Math.round(n)).padStart(w, '0');
-  const C = [];
-  // master warning and caution, before each pilot
-  for (const x of [-span * 0.82, span * 0.82]) {
-    const cx = px(x);
-    C.push(pbC(cx - 34, 64, 58, { top: () => ({ t: 'MASTER', col: 'red', on: !!(SYS() && SYS().S.mw && Math.floor(performance.now() / 400) % 2) }), bot: () => ({ t: 'WARN', col: 'red', on: !!(SYS() && SYS().S.mw && Math.floor(performance.now() / 400) % 2) }), click: () => SYS() && SYS().set('masterWarn'), tip: 'MASTER WARN: push to silence the chime' }));
-    C.push(pbC(cx + 34, 64, 58, { top: () => ({ t: 'MASTER', col: 'amber', on: !!(SYS() && SYS().S.mc) }), bot: () => ({ t: 'CAUT', col: 'amber', on: !!(SYS() && SYS().S.mc) }), click: () => SYS() && SYS().set('masterCaut'), tip: 'MASTER CAUT: push to clear' }));
-  }
-  // EFIS control panels
-  for (const x of [-span * 0.55, span * 0.55]) {
-    const cx = px(x);
-    C.push(fcuBtnC(cx - 120, 40, 44, 34, 'FD', () => !!(F() && F().fd), () => press('FD'), 'FD: the flight directors on the PFD'));
-    C.push(fcuBtnC(cx - 120, 90, 44, 34, 'LS', () => !!(F() && F().ls), () => press('LS'), 'LS: the ILS deviations on the PFD'));
-    const leg = ['CSTR', 'WPT', 'VOR.D', 'NDB', 'ARPT'];
-    leg.forEach((l, i) => C.push(fcuBtnC(cx - 62 + i * 38, 32, 34, 28, l, () => (l === 'ARPT' ? !!(F() && F().nd.arpt) : false), l === 'ARPT' ? () => press('ARPT') : null, l === 'ARPT' ? 'ARPT: the airports on the ND' : l)));
-    C.push(rotC(cx + 0, 96, 13, 'MODE', [['ROSE', 'ROSE'], ['ARC', 'ARC'], ['PLAN', 'PLAN']], () => (F() ? F().nd.mode : 'ARC'), (v) => { const f = F(); if (f) f.nd.mode = v; }, 'ND MODE: ROSE NAV · ARC · PLAN'));
-    C.push(rotC(cx + 86, 96, 13, 'RANGE', [[10, '10'], [20, '20'], [40, '40'], [80, '80'], [160, '160'], [320, '320']], () => (F() ? F().nd.range : 40), (v) => { const f = F(); if (f) f.nd.range = v; }, 'ND RANGE (NM)'));
-  }
-  // the FCU
-  const f0 = px(-span * 0.33), fw = px(span * 0.33) - f0;
-  const at = (f) => f0 + f * fw;
-  const managedSpd = () => s().spdSel == null && s().machSel == null;
-  C.push(fcuBtnC(at(0.05), 92, 50, 34, 'SPD\nMACH', () => false, () => press('SPDMACH')));
-  C.push(winC(at(0.15), 40, 84, 28, () => {
-    const f = F(); if (!f) return ['---', false];
-    if (f.fcu.spdPreset != null) return [pad(f.fcu.spdPreset, 3), false];
-    if (managedSpd()) return ['---', true];
-    return s().machSel != null ? [`.${pad(s().machSel * 100, 2)}`, false] : [pad(s().spdSel, 3), false];
-  }));
-  C.push(fcuKnobC(at(0.15), 94, 19, 'spd'));
-  C.push(fcuBtnC(at(0.25), 92, 50, 34, 'LOC', () => !!(F() && F().locBtn && !F().appr), () => press('LOC')));
-  const hdgMgd = () => { const f = F(); return !!f && (f.hdgMgd || ['NAV', 'LOC*', 'LOC', 'LAND', 'FLARE', 'ROLL OUT'].includes(f.lat)); };
-  C.push(winC(at(0.35), 40, 84, 28, () => { const f = F(); if (!f) return ['---', false]; if (f.fcu.hdgPreset != null) return [pad(f.fcu.hdgPreset, 3), false]; return hdgMgd() ? ['---', true] : [pad(f.fcu.hdg % 360, 3), false]; }));
-  C.push(fcuKnobC(at(0.35), 94, 19, 'hdg'));
-  C.push(fcuBtnC(at(0.44), 40, 62, 34, 'HDG V/S\nTRK FPA', () => false, () => press('TRKFPA')));
-  C.push(fcuBtnC(at(0.50), 92, 46, 32, 'AP1', () => !!(F() && F().ap1), () => press('AP1')));
-  C.push(fcuBtnC(at(0.565), 92, 46, 32, 'AP2', () => !!(F() && F().ap2), () => press('AP2')));
-  C.push(fcuBtnC(at(0.532), 40, 60, 30, 'A/THR', () => !!(s().athr && s().spec && s().spec.athr), () => press('ATHR')));
-  C.push(winC(at(0.66), 40, 104, 28, () => { const f = F(); return f ? [pad(f.fcu.alt, 5), f.altMgd] : ['-----', false]; }));
-  C.push(fcuKnobC(at(0.66), 94, 19, 'alt'));
-  C.push(fcuBtnC(at(0.755), 40, 50, 30, 'ALT\n100/1000', () => false, () => press('ALTINC'), 'the ALT knob: 100 or 1000 ft a step'));
-  C.push(winC(at(0.755), 92, 50, 22, () => { const f = F(); return [f ? String(f.fcu.altInc) : '1000', false]; }));
-  C.push(fcuBtnC(at(0.83), 92, 52, 34, 'EXPED', () => !!(F() && F().exped), () => press('EXPED')));
-  C.push(winC(at(0.885), 40, 84, 28, () => {
-    const f = F(); if (!f) return ['-----', false];
-    if (f.vert === 'V/S') return [`${f.fcu.vs < 0 ? '-' : '+'}${pad(Math.abs(f.fcu.vs) / 100, 2)}oo`, false];
-    if (f.vert === 'FPA') return [`${f.fcu.fpa < 0 ? '-' : '+'}${Math.abs(f.fcu.fpa).toFixed(1)}`, false];
-    return ['-----', false];
-  }));
-  C.push(fcuKnobC(at(0.885), 94, 19, 'vs'));
-  C.push(fcuBtnC(at(0.96), 92, 50, 34, 'APPR', () => !!(F() && F().appr), () => press('APPR')));
-  return livePanel(W, H, '#16181b', (T) => {
-    for (const x of [-span * 0.82, span * 0.82]) T.plate(px(x) - 74, 14, 148, 100, '#202326');
-    for (const x of [-span * 0.55, span * 0.55]) { T.plate(px(x) - 150, 6, 300, 116); T.label(px(x) - 8, 66, 'EFIS', 9, '#9aa1aa'); }
-    T.plate(f0 - 6, 4, fw + 12, 120, '#33373d');
-    const lbl = (f, y, t) => T.label(at(f), y, t, 11);
-    lbl(0.15, 14, 'SPD   MACH'); lbl(0.35, 14, 'HDG   TRK   LAT'); lbl(0.66, 14, 'ALT    LVL/CH'); lbl(0.885, 14, 'V/S   FPA');
-  }, C);
-}
-
-// ---------- the overhead panel (both decks) ----------
-// Laid out as on the A320 (looking up, aft at the top): ADIRS, calls and the like aft; FIRE with HYD and FUEL; ELEC,
-// AIR (APU BLEED) and ANTI ICE; then forward EXT LT, APU and SIGNS, and the wipers either side of INT LT.
-function overheadPanel(nEng) {
-  const W = 1024, H = 1004;
-  const sys = () => SYS();
-  const S = () => (sys() ? sys().S : null);
-  const set = (what, v, i) => { const x = sys(); if (x) x.set(what, v, i); };
-  const C = [];
-  const lit = (t, col, on) => ({ t, col, on: !!on });
-  // FIRE: one block per engine and the APU, with the TEST button
-  const fireY = 136, blocks = [...Array(nEng).keys(), 'apu'];
-  const fx0 = nEng > 2 ? 30 : 290, fx1 = nEng > 2 ? 994 : 734;
-  const bw = (fx1 - fx0) / blocks.length;
-  blocks.forEach((i, k) => {
-    const x = fx0 + bw * (k + 0.5);
-    const name = i === 'apu' ? 'APU' : `ENG ${i + 1}`;
-    const e = () => (S() ? (i === 'apu' ? S().apu : S().eng[i]) : null);
-    C.push(fireC(x, fireY + 70, Math.min(96, bw - 22), 66, name, () => !!(e() && e().fire), () => !!(e() && e().firePb), () => set('firePb', undefined, i)));
-    const ag = i === 'apu' ? [0] : [0, 1];
-    ag.forEach((b) => {
-      const ax = ag.length === 1 ? x : x + (b ? 1 : -1) * Math.min(26, bw * 0.24);
-      const done = () => (e() ? (i === 'apu' ? !!e().agent : !!e().agents[b]) : false);
-      C.push(pbC(ax, fireY + 162, 44, { top: () => lit('SQUIB', 'white', e() && e().firePb && !done()), bot: () => lit('DISCH', 'amber', done()), click: () => set('agent', b, i), tip: `${name} AGENT ${ag.length > 1 ? b + 1 : ''}: discharge the bottle (FIRE pushbutton pushed first)` }));
-    });
-  });
-  C.push(pbC(512, fireY + 222, 36, { bot: () => lit('TEST', 'white', S() && S().test > 0), click: () => set('fireTest'), tip: 'FIRE TEST: every fire light and the chime' }));
-  // AIR: APU BLEED
-  C.push(pbC(512, 478, 50, { top: () => lit('FAULT', 'amber', false), bot: () => lit('ON', 'blue', S() && S().apu.bleed), click: () => set('apuBleed'), tip: 'APU BLEED: the APU\'s air for the engine starts' }));
-  // ANTI ICE: wing, each engine; probe / window heat (always AUTO)
-  C.push(pbC(724, 482, 46, { top: () => lit('FAULT', 'amber', false), bot: () => lit('ON', 'blue', S() && S().wingAntiIce), click: () => set('wingAntiIce'), tip: 'WING ANTI ICE' }));
-  for (let i = 0; i < nEng; i++) {
-    const x = 800 + i * (nEng > 2 ? 52 : 80);
-    C.push(pbC(x, 482, 46, { top: () => lit('FAULT', 'amber', false), bot: () => lit('ON', 'blue', S() && S().eng[i] && S().eng[i].antiIce), click: () => set('engAntiIce', undefined, i), tip: `ENG ${i + 1} ANTI ICE` }));
-  }
-  // EXT LT
-  const xl = [['STROBE', 'strobe', [['ON', 'ON'], ['AUTO', 'AUTO'], ['OFF', 'OFF']]], ['BEACON', 'beacon', [[1, 'ON'], [0, 'OFF']]], ['WING', 'wing', [[1, 'ON'], [0, 'OFF']]],
-    ['NAV&LOGO', 'nav', [[1, '1'], [0, 'OFF']]], ['RWY TURN OFF', 'rwy', [[1, 'ON'], [0, 'OFF']]], ['LAND', 'land', [['ON', 'ON'], ['OFF', 'OFF'], ['RETRACT', 'RETR']]], ['NOSE', 'nose', [['TO', 'T.O'], ['TAXI', 'TAXI'], ['OFF', 'OFF']]]];
-  xl.forEach(([label, key, opts], k) => C.push(swC(48 + k * 68, 756, 34, label, opts, () => (S() ? S().lt[key] : opts[0][0]), (v) => set(key, v), `${label} light`)));
-  // APU
-  C.push(pbC(590, 744, 50, { top: () => lit('FAULT', 'amber', S() && S().apu.fire), bot: () => lit('ON', 'blue', S() && S().apu.master), click: () => set('apuMaster'), tip: 'APU MASTER SW' }));
-  C.push(pbC(660, 744, 50, { top: () => lit('ON', 'blue', S() && S().apu.start), bot: () => lit('AVAIL', 'green', S() && S().apu.avail), click: () => set('apuStart'), tip: 'APU START (master on first): about a minute to AVAIL' }));
-  // SIGNS
-  C.push(swC(770, 756, 34, 'SEAT BELTS', [[1, 'ON'], [0, 'OFF']], () => (S() ? S().signs.belts : 1), (v) => set('belts', v)));
-  C.push(swC(860, 756, 34, 'NO SMOKING', [[1, 'ON'], [0, 'OFF']], () => (S() ? S().signs.smoke : 1), (v) => set('smoke', v)));
-  // INT LT and the wipers
-  C.push(rotC(80, 942, 20, 'WIPER', [[0, 'OFF'], [1, 'SLOW'], [2, 'FAST']], () => (S() ? S().wipers[0] : 0), (v) => set('wiper', v, 0), 'Captain\'s wiper'));
-  C.push(rotC(944, 942, 20, 'WIPER', [[0, 'OFF'], [1, 'SLOW'], [2, 'FAST']], () => (S() ? S().wipers[1] : 0), (v) => set('wiper', v, 1), 'First officer\'s wiper'));
-  C.push(dimC(240, 930, 18, 'OVHD INTEG LT', () => (S() ? S().lt.integ : 0.8), (v) => set('integ', v)));
-  C.push(dimC(360, 930, 18, 'FLOOD LT', () => (S() ? S().lt.flood : 0), (v) => set('flood', v)));
-  C.push(swC(480, 936, 32, 'DOME', [['BRT', 'BRT'], ['DIM', 'DIM'], ['OFF', 'OFF']], () => (S() ? S().lt.dome : 'OFF'), (v) => set('dome', v), 'DOME light'));
-  C.push(swC(600, 936, 32, 'ANN LT', [['TEST', 'TEST'], ['BRT', 'BRT'], ['DIM', 'DIM']], () => (S() ? S().lt.ann : 'BRT'), (v) => set('ann', v), 'ANN LT: TEST lights every light'));
-  return livePanel(W, H, '#4b5058', (T) => {
-    // aft: the parts that are only pictures
-    T.plate(10, 8, 1004, 120); T.title(10, 22, 1004, 'ADIRS · EVAC · EMER ELEC · GPWS · RCDR · OXYGEN · CALLS');
-    T.rows(46, 76, 14, 1, 71, 0, 40, [['FAULT', 'ALIGN'], ['FAULT', 'ALIGN'], ['FAULT', 'ALIGN'], ['', 'CMD'], ['FAULT', 'GEN 1'], ['', 'SYS'], ['', 'TERR'], ['', 'G/S'], ['', 'FLAP'], ['', 'GND'], ['', 'MASK'], ['', 'CREW'], ['', 'MECH'], ['', 'ALL']]);
-    // FIRE, HYD, FUEL
-    if (nEng <= 2) {
-      T.plate(10, 136, 270, 260); T.title(10, 150, 270, 'HYD');
-      T.rows(55, 210, 3, 2, 90, 90, 44, [['FAULT', 'OFF'], ['FAULT', 'AUTO'], ['FAULT', 'OFF'], ['', 'ENG 1'], ['', 'PTU'], ['', 'ENG 2']]);
-      T.plate(744, 136, 270, 260); T.title(744, 150, 270, 'FUEL');
-      T.rows(789, 210, 3, 2, 90, 90, 44, [['FAULT', 'OFF'], ['FAULT', 'AUTO'], ['FAULT', 'OFF'], ['FAULT', 'OFF'], ['', 'X FEED'], ['FAULT', 'OFF']]);
-    }
-    T.plate(fx0 - 10, 136, fx1 - fx0 + 20, 260, '#454a52'); T.title(fx0 - 10, 150, fx1 - fx0 + 20, 'FIRE');
-    // ELEC, AIR, ANTI ICE
-    T.plate(10, 404, 330, 230); T.title(10, 418, 330, 'ELEC');
-    T.rows(55, 470, 4, 2, 80, 80, 44, [['FAULT', 'OFF'], ['FAULT', 'OFF'], ['', 'AUTO'], ['FAULT', 'OFF'], ['FAULT', 'GEN 1'], ['', 'APU GEN'], ['', 'EXT PWR'], ['FAULT', 'GEN 2']]);
-    T.label(175, 612, 'BAT 1   BAT 2   BUS TIE', 10);
-    T.plate(350, 404, 324, 230); T.title(350, 418, 324, 'AIR COND');
-    T.rows(392, 478, 2, 1, 240, 0, 44, [['FAULT', 'ON'], ['FAULT', 'ON']]);
-    T.label(512, 446, 'APU BLEED', 10);
-    T.rows(392, 576, 2, 1, 240, 0, 40, [['FAULT', 'OFF'], ['FAULT', 'OFF']]);
-    T.label(512, 576, 'PACK 1 · PACK 2', 9);
-    T.plate(684, 404, 330, 230); T.title(684, 418, 330, 'ANTI ICE');
-    T.label(724, 448, 'WING', 10);
-    T.label(nEng > 2 ? 878 : 840, 448, nEng > 2 ? 'ENG 1 · 2 · 3 · 4' : 'ENG 1      ENG 2', 10);
-    T.rows(760, 576, 3, 1, 90, 0, 40, [['FAULT', 'AUTO'], ['', 'ON'], ['', 'AUTO']]);
-    T.label(850, 608, 'PROBE / WINDOW HEAT', 9);
-    // EXT LT, APU, SIGNS, INT LT
-    T.plate(10, 642, 500, 200); T.title(10, 656, 500, 'EXT LT');
-    T.plate(520, 642, 210, 200); T.title(520, 656, 210, 'APU');
-    T.label(590, 786, 'MASTER SW', 9); T.label(660, 786, 'START', 9);
-    T.plate(740, 642, 274, 200); T.title(740, 656, 274, 'SIGNS');
-    T.toggle(955, 756, 34, 1, 3); T.label(955, 720, 'EMER EXIT LT', 9);
-    T.plate(10, 850, 140, 146); T.plate(874, 850, 140, 146);
-    T.plate(160, 850, 704, 146); T.title(160, 864, 704, 'INT LT');
-    T.label(740, 896, 'ICE IND & STBY COMPASS', 9); T.toggle(740, 940, 30, 1, 2);
-  }, C);
-}
-
-// ---------- the pedestal's top (per deck): MCDUs or KCCUs at the front, radios, the levers' quadrant, ENG ----------
-function pedestalPanel(kind, nEng) {
-  const W = 512, H = 1024;
-  const S = () => (SYS() ? SYS().S : null);
-  const set = (what, v, i) => { const x = SYS(); if (x) x.set(what, v, i); };
-  const C = [];
-  const engY = kind === 'a320' ? 800 : 640;
-  // the engine masters, each with its FIRE and FAULT lights, and the mode selector
-  for (let i = 0; i < nEng; i++) {
-    const x = nEng > 2 ? 110 + i * 64 : (i ? W * 0.62 : W * 0.38);
-    C.push(pbC(x, engY - 58, 38, { top: () => ({ t: 'FIRE', col: 'red', on: !!(S() && S().eng[i] && S().eng[i].fire) }), bot: () => ({ t: 'FAULT', col: 'amber', on: !!(S() && S().eng[i] && (S().eng[i].failed || S().eng[i].start)) }), tip: `ENG ${i + 1}: FIRE and FAULT lights` }));
-    C.push(swC(x - 8, engY + 10, 44, `MASTER ${i + 1}`, [[1, 'ON'], [0, 'OFF']], () => (S() && S().eng[i] ? S().eng[i].master : 1), (v) => set('master', v, i), `ENG MASTER ${i + 1}: OFF cuts its fuel; ON with IGN starts it`));
-  }
-  C.push(rotC(nEng > 2 ? 400 : W * 0.5, engY + (nEng > 2 ? 110 : 20), 20, 'MODE', [['CRANK', 'CRANK'], ['NORM', 'NORM'], ['IGN', 'IGN/START']], () => (S() ? S().engMode : 'NORM'), (v) => set('engMode', v), 'ENG MODE selector: IGN/START to start or relight an engine'));
-  // the MCDUs (a click opens the MCDU)
-  if (kind === 'a320') {
-    for (const cx of [W * 0.25, W * 0.75]) {
-      C.push({ x: cx, y: 175, w: 230, h: 300, tip: 'MCDU: click to open (Y)', click: () => { if (FG.mcdu) FG.mcdu.toggle(); }, sig: () => '' });
-    }
-  }
-  // the parking brake
-  C.push({ x: W * 0.5, y: kind === 'a320' ? 965 : 980, w: 160, h: 60, tip: 'PARKING BRK (K)', sig: () => J(!!P_().state.parking),
-    draw(T) { T.plate(W * 0.5 - 80, (kind === 'a320' ? 965 : 980) - 30, 160, 60, '#33373d'); T.label(W * 0.5, (kind === 'a320' ? 965 : 980) - 14, 'PARK BRK', 10); T.label(W * 0.5, (kind === 'a320' ? 965 : 980) + 12, P_().state.parking ? 'ON' : 'OFF', 12, P_().state.parking ? '#ffb000' : '#e9edf1'); },
-    click: () => { const s = P_().state; s.parking = !s.parking; } });
-  return livePanel(W, H, '#4b5058', (T, b, g) => {
-    if (kind === 'a320') {
-      // the two MCDUs, their screens with the page's outline
-      for (const cx of [W * 0.25, W * 0.75]) {
-        T.plate(cx - 118, 22, 236, 310, '#2c3035');
-        b.fillStyle = '#05070a'; b.fillRect(cx - 92, 36, 184, 120);
-        g.fillStyle = '#0a2a14';
-        const f = FG.fmgc && FG.fmgc.F, plan = f && f.plan;
-        const lines = [plan ? `${(plan.from && plan.from.code) || ''}/${(plan.to && plan.to.code) || ''}` : 'MCDU MENU', 'F-PLN', 'INIT  PERF', 'PROG  DIR', 'RAD NAV'];
-        lines.forEach((l, i) => { for (const c of [b, g]) { c.font = '600 13px ui-monospace, monospace'; c.textAlign = 'center'; c.fillStyle = i ? '#30d158' : '#e9edf1'; c.fillText(l, cx, 54 + i * 22); } });
-        b.fillStyle = '#1a1c1f';
-        for (let r = 0; r < 6; r++) for (let c = 0; c < 6; c++) b.fillRect(cx - 96 + c * 33, 168 + r * 26, 28, 20);
-        for (let r = 0; r < 6; r++) { b.fillRect(cx - 114, 44 + r * 19, 14, 11); b.fillRect(cx + 100, 44 + r * 19, 14, 11); }
-      }
-    } else {
-      // KCCUs (front part, ahead of the levers)
-      for (const cx of [W * 0.24, W * 0.76]) {
-        T.plate(cx - 110, 20, 220, 300, '#2c3035');
-        b.fillStyle = '#1a1c1f';
-        for (let r = 0; r < 6; r++) for (let c = 0; c < 8; c++) b.fillRect(cx - 100 + c * 25, 40 + r * 26, 21, 21);
-        g.fillStyle = '#20262c';
-        for (let r = 0; r < 6; r++) for (let c = 0; c < 8; c++) g.fillRect(cx - 96 + c * 25, 47 + r * 26, 12, 6);
-        const grd = b.createRadialGradient(cx - 6, 250, 3, cx, 255, 30);
-        grd.addColorStop(0, '#8d949c'); grd.addColorStop(1, '#25282c');
-        b.fillStyle = grd; b.beginPath(); b.arc(cx, 255, 28, 0, 7); b.fill(); // track ball
-      }
-    }
-    // radios and the transponder
-    const ry = kind === 'a320' ? 345 : 720;
-    for (let i = 0; i < 2; i++) {
-      const y = ry + i * (kind === 'a320' ? 0 : 145), x0 = kind === 'a320' ? (i ? W / 2 + 4 : 14) : 14, w = kind === 'a320' ? W / 2 - 18 : W - 28;
-      if (kind === 'a320' && i) { /* side by side */ }
-      T.plate(x0, y, w, kind === 'a320' ? 120 : 135);
-      T.window(x0 + w * 0.3, y + 36, w * 0.36, 26, i ? '121.500' : '118.705');
-      T.window(x0 + w * 0.72, y + 36, w * 0.36, 26, i ? '7000' : '121.500');
-      T.rows(x0 + w * 0.14, y + 88, kind === 'a320' ? 4 : 6, 1, kind === 'a320' ? w * 0.24 : 64, 0, 30, [['', 'VHF1', 1], ['', 'VHF2'], ['', 'VHF3'], ['', 'HF1'], ['', 'HF2'], ['', 'INT']]);
-    }
-    // the levers' quadrant
-    if (kind === 'a320') { T.plate(W * 0.2, 480, W * 0.6, 240, '#24272b'); T.label(W * 0.5, 496, 'TOGA · FLX MCT · CL · IDLE', 9, '#9aa1aa'); }
-    // ENG panel
-    T.plate(14, engY - 96, W - 28, nEng > 2 ? 250 : 170, '#33373d');
-    T.label(W * 0.5, engY - 84, 'ENG', 13);
-  }, C);
-}
-
-// ---------- the main panel's face round the screens ----------
-function mainPanelArt(kind) {
-  if (kind === 'a320') {
-    return livePanel(1024, 256, '#4b5058', (T, b) => {
-      b.fillStyle = 'rgba(255,255,255,0.04)';
-      for (let x = 0; x < 1024; x += 64) b.fillRect(x, 0, 1, 256);
-      // the brightness knobs and the loudspeaker grilles under the screens
-      for (const cx of [200, 824]) {
-        T.knob(cx - 80, 232, 8); T.knob(cx + 80, 232, 8);
-        b.fillStyle = '#2f3339'; for (let i = 0; i < 9; i++) b.fillRect(cx - 30 + i * 7, 220, 3, 22);
-      }
-      // the clock and the A/SKID & N/W STRG switch round the middle
-      T.plate(712, 150, 70, 96); T.label(747, 166, 'CLOCK', 8);
-      b.fillStyle = '#050505'; b.fillRect(718, 180, 58, 22);
-      T.label(747, 228, 'A/SKID & N/W STRG', 6);
-    }, autobrakeCtl(408, 200, 'a320'));
-  }
-  return livePanel(1024, 256, '#4b5058', (T, b) => {
+// (the panels: modules laid out per deck, src/panels.js)
+// The main panel's face round the screens (the modules on it: src/panels.js LAYOUTS[kind].main).
+function mainFace(kind) {
+  return (T, b, g, W, H) => {
     b.fillStyle = 'rgba(255,255,255,0.04)';
-    for (let x = 0; x < 1024; x += 64) b.fillRect(x, 0, 1, 256);
-    for (const cx of [1024 * 0.27, 1024 * 0.73]) {
-      T.knob(cx - 60, 256 * 0.88, 9); T.knob(cx + 60, 256 * 0.88, 9);
-      b.fillStyle = '#2f3339'; for (let i = 0; i < 9; i++) b.fillRect(cx - 30 + i * 7, 256 * 0.84, 3, 22);
+    for (let x = 0; x < W; x += 64) b.fillRect(x, 0, 1, H);
+    for (const cx of kind === 'a320' ? [200, 824] : [W * 0.27, W * 0.73]) {
+      b.fillStyle = '#2f3339'; for (let i = 0; i < 9; i++) b.fillRect(cx - 30 + i * 7, kind === 'a320' ? 220 : H * 0.84, 3, 22);
     }
-    T.plate(1024 * 0.43, 256 * 0.80, 1024 * 0.14, 256 * 0.18);
-  }, autobrakeCtl(1024 * 0.465, 256 * 0.89, 'a350'));
-}
-// The AUTO BRK buttons (LO, MED, MAX: the FMGC's).
-function autobrakeCtl(x0, y0, kind) {
-  const F = () => (FG.fmgc ? FG.fmgc.F : null);
-  return ['LO', 'MED', 'MAX'].map((m, i) => pbC(kind === 'a320' ? x0 : x0 + i * 36, kind === 'a320' ? y0 - 70 + i * 34 : y0, kind === 'a320' ? 30 : 28, {
-    top: () => ({ t: 'DECEL', col: 'green', on: !!(F() && F().abrk === m && F().abrkOn) }),
-    bot: () => ({ t: m, col: 'blue', on: !!(F() && F().abrk === m) }),
-    click: () => { if (FG.fmgc) FG.fmgc.press(`BRK ${m}`); }, tip: `AUTO BRK ${m}` }));
+  };
 }
 
 // ---------- geometry ----------
@@ -714,7 +218,7 @@ function build(kind, nEng) {
   root.add(shapeMesh(topOutline, [], (u, v) => [u, v, GT], M.shield));
   {
     const span = a320 ? 0.86 : 1.05;
-    const gp = glareshieldPanel(span);
+    const gp = surface('glareshield', kind, nEng);
     const mat = livePanelMat(gp);
     const n = 40, pos = [], uv = [], idx = [];
     for (let i = 0; i <= n; i++) {
@@ -750,7 +254,7 @@ function build(kind, nEng) {
   const P = a320
     ? { top: GT - GF - 0.005, bot: -0.80, y: 0.70, lean: 0.12, mid: 0.20, wing: 14 * Math.PI / 180, end: 0.92 }
     : { top: GT - GF - 0.005, bot: -0.86, y: 0.84, lean: 0.14, mid: 0.66, wing: 24 * Math.PI / 180, end: 1.10 };
-  const mainP = mainPanelArt(kind);
+  const mainP = surface('main', kind, nEng, mainFace(kind));
   const panelMat = livePanelMat(mainP);
   // (u across the panel's face from the middle, v down from its top: cockpit space)
   const panelAt = (u, v) => {
@@ -798,7 +302,7 @@ function build(kind, nEng) {
     sheen.position.z = 0.0095;
     g.add(sheen);
     root.add(g);
-    screens.push({ kind: kindS, cv, ctx: cv.getContext('2d'), tex });
+    screens.push({ kind: kindS, cv, ctx: cv.getContext('2d'), tex, side: u < 0 ? 0 : 1 });
   };
   const vS = 0.012;
   let isisAt, gearAt;
@@ -860,7 +364,7 @@ function build(kind, nEng) {
   // the pedestal: from under the panel back between the seats
   const ped = a320 ? { w: 0.25, top: -0.72, front: 0.62, slope: 0.30, rear: -0.70 } : { w: 0.27, top: -0.76, front: 0.74, slope: 0.36, rear: -0.70 };
   {
-    const pp = pedestalPanel(kind, nEng);
+    const pp = surface('pedestal', kind, nEng);
     const mat = livePanelMat(pp);
     // its top: the slope then flat (u = x, v = along)
     const prof = [[ped.front, P.bot + 0.02], [ped.slope, ped.top], [ped.rear, ped.top]];
@@ -935,7 +439,7 @@ function build(kind, nEng) {
 
   // the overhead panel, under the ceiling from behind the windscreens back over the pilots' heads
   {
-    const op = overheadPanel(nEng);
+    const op = surface('overhead', kind, nEng);
     const mat = livePanelMat(op);
     // (sloped as the real one: its front end lower, over the windscreens; as long as its picture says)
     const w = a320 ? 0.42 : 0.46, zf = ROOF - 0.20, zb = ROOF - 0.02, f = frontY(0, zf) - 0.03;
@@ -1052,12 +556,12 @@ function pfdScreen(c, W, H, P) {
   c.save(); c.translate(0, M ? (H - h * k) / 2 + 48 * k : 0); P.panel(c, 'pfd', W, M ? 270 * k : H); c.restore();
 }
 // The ND: the FMGC's (flight plan, modes, ranges) when it is on, else the plain one.
-function ndScreen(c, W, H, P) {
+function ndScreen(c, W, H, P, side = 0) {
   const M = FM();
   if (!M) { P.panel(c, 'nd', W, H); return; }
   c.fillStyle = '#000'; c.fillRect(0, 0, W, H);
   const k = Math.min(W, H) / 324;
-  c.save(); c.translate((W - 324 * k) / 2, (H - 324 * k) / 2); c.scale(k, k); M.drawNd(c); c.restore();
+  c.save(); c.translate((W - 324 * k) / 2, (H - 324 * k) / 2); c.scale(k, k); M.drawNd(c, side); c.restore();
 }
 // The E/WD: N1 for each engine, the flaps, and the warnings, cautions and memo (src/systems.js) below.
 const ECOL = { red: '#ff3b30', amber: '#ffb000', cyan: '#4fd6ff', green: '#30d158', white: '#e8eef8' };
@@ -1117,9 +621,10 @@ function ewdScreen(c, W, H, P) {
 // ground; else the WHEEL page.
 function sdScreen(c, W, H, P) {
   const s = P.state, sys = SYS();
-  const engPage = sys && sys.S.eng.some((e) => e.fire || e.start || !e.run);
-  const apuPage = sys && !engPage && (sys.S.apu.n > 1 || sys.S.apu.fire);
-  if (!engPage && !apuPage) { P.panel(c, 'sd', W, H); return; }
+  // the page: the ECAM control panel's, or the one the systems call up (src/aircraft.js sdPage)
+  const pg = sys && sys.sdPage ? sys.sdPage() : sys && sys.S.eng.some((e) => e.fire || e.start || !e.run) ? 'ENG' : sys && (sys.S.apu.n > 1 || sys.S.apu.fire) ? 'APU' : 'WHEEL';
+  const engPage = pg === 'ENG', apuPage = pg === 'APU';
+  if (!engPage && !apuPage) { if (!(sys && sys.sd(c, W, H, pg))) P.panel(c, 'sd', W, H); return; }
   c.fillStyle = '#05070a'; c.fillRect(0, 0, W, H);
   c.textBaseline = 'middle'; c.textAlign = 'center';
   const f = Math.round(H * 0.05);
@@ -1160,6 +665,31 @@ function sdScreen(c, W, H, P) {
   }
 }
 
+// After a screen is drawn: dark without power, the failure flags of a pilot's IR (src/aircraft.js), its brightness.
+const SCREEN_IDS = { pfd: ['pfd'], nd: ['nd'], 'pfdnd-c': ['pfd', 'nd'], 'pfdnd-f': ['pfd', 'nd'], ewd: ['ewd'], sd: ['sd'], isis: ['isis'], ois: ['sd'], 'ois-f': ['sd'] };
+function finish(c, W, H, sc) {
+  const sys = SYS();
+  if (!sys || !sys.screenOn) return;
+  const ids = (SCREEN_IDS[sc.kind] || ['sd']).map((k) => (k === 'pfd' || k === 'nd' ? `${k}${sc.side + 1}` : k));
+  if (!ids.some((id) => sys.screenOn(id))) { c.fillStyle = '#020203'; c.fillRect(0, 0, W, H); return; }
+  const side = sys.side ? sys.side(sc.side) : { att: true, nav: true, air: true };
+  const flag = (t, x, y, k = 0.07) => { c.font = `700 ${Math.round(H * k)}px system-ui, sans-serif`; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillStyle = '#ff3b30'; c.fillText(t, x, y); };
+  const two = ids.length === 2, pfdLeft = sc.kind === 'pfdnd-c';
+  for (const id of ids) {
+    const x0 = two ? ((id.startsWith('pfd') === pfdLeft) ? 0 : W / 2) : 0, w = two ? W / 2 : W;
+    if (id.startsWith('pfd') && !side.att) { c.fillStyle = '#05070a'; c.fillRect(x0, H * 0.18, w, H * 0.64); flag('ATT', x0 + w / 2, H / 2, 0.09); }
+    if (id.startsWith('pfd') && !side.air) { flag('SPD', x0 + w * 0.12, H / 2); flag('ALT', x0 + w * 0.86, H / 2); }
+    if (id.startsWith('nd') && !side.nav) { c.fillStyle = '#05070a'; c.fillRect(x0, H * 0.1, w, H * 0.8); flag(side.att ? 'MAP NOT AVAIL' : 'HDG', x0 + w / 2, H / 2, 0.06); }
+  }
+  const B = sys.S.misc && sys.S.misc.bright;
+  if (B) for (const id of ids) {
+    const b = B[id] ?? 1;
+    if (b >= 0.99) continue;
+    const x0 = two ? ((id.startsWith('pfd') === pfdLeft) ? 0 : W / 2) : 0, w = two ? W / 2 : W;
+    c.fillStyle = `rgba(0,0,0,${Math.min(1, 1 - b)})`; c.fillRect(x0, 0, w, H);
+  }
+}
+
 function paintScreens(now, P) {
   if (now - paintedAt < 80) return; // (about 12 times a second)
   paintedAt = now;
@@ -1175,14 +705,15 @@ function paintScreens(now, P) {
       const pfdLeft = sc.kind === 'pfdnd-c';
       c.fillStyle = '#05070a'; c.fillRect(0, 0, W, H);
       c.save(); c.translate(pfdLeft ? 0 : W / 2, 0); pfdScreen(c, W / 2, H, P); c.restore();
-      c.save(); c.translate(pfdLeft ? W / 2 : 0, 0); ndScreen(c, W / 2, H, P); c.restore();
+      c.save(); c.translate(pfdLeft ? W / 2 : 0, 0); ndScreen(c, W / 2, H, P, sc.side); c.restore();
       c.fillStyle = '#1a1d21'; c.fillRect(W / 2 - 2, 0, 4, H);
     } else if (sc.kind === 'pfd') pfdScreen(c, W, H, P);
-    else if (sc.kind === 'nd') ndScreen(c, W, H, P);
+    else if (sc.kind === 'nd') ndScreen(c, W, H, P, sc.side);
     else if (sc.kind === 'ewd') ewdScreen(c, W, H, P);
     else if (sc.kind === 'sd') sdScreen(c, W, H, P);
     else if (sc.kind === 'isis') isis(c, W, H, info);
     else ois(c, W, H, info, sc.kind === 'ois-f');
+    finish(c, W, H, sc);
     sc.tex.needsUpdate = true;
   }
 }

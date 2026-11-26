@@ -35,6 +35,8 @@ def main():
     page = re.sub(r'\s*<script type="module"[^>]*></script>', '', page)
     page = re.sub(r'\s*<script src="\.\./src/boot\.js[^"]*"></script>', '', page)
     stub = ('<script>FG.view3d = { on: true, map: null, setOn() {}, pilotCam() {}, fov: () => 36.87 }; FG.flat = null;</script>\n'
+            # (the aircraft's systems too, as the 3D deck loads them: fuel burns off, hydraulics, power, radios)
+            + ('' if os.environ.get('NOSYS') else '  <script src="../src/systems.js"></script>\n  <script src="../src/aircraft.js"></script>\n  <script src="../src/radio.js"></script>\n') +
             '  <script src="../test/ap-test.js"></script>\n</body>')
     page = page.replace('</body>', stub)
     test_page = os.path.join(ROOT, 'test-ap.html')

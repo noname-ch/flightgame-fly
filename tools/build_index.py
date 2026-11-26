@@ -7,7 +7,9 @@ Run it after every update of the flightgame submodule. What it changes in the ga
   the submodule; this repo's own files are linked as ../src/... and ../css/...
 - the game's js/flylink.js (its ✈ Fly button and P, which open this page) is left out: src/pilot.js (the flying, with
   the autopilot hooks) and the rest of ours take its place; src/cockpit3d.js (the A350s' flight deck) as a module
-- src/guard.js right after js/game.js (never write the game's save), then the FMGC, FCU, MCDU and boot scripts
+- src/guard.js right after js/game.js (never write the game's save), then the radio beacons and frequencies
+  (src/data/navdata.js: tools/build_navdata.py), the FMGC, FCU, MCDU and boot scripts (cockpit3d.js loads
+  panels.js, systems.js, aircraft.js and radio.js)
 - every ?v= of our own files is a new timestamp, so browsers never mix old and new files
 """
 import io
@@ -36,7 +38,7 @@ def main():
     once(r'<title>[^<]*</title>', '<title>Flightgame · Fly</title>')
     once(r'(<link rel="stylesheet" href="css/themes\.css\?v=\d+">)', r'\1\n  <link rel="stylesheet" href="../css/fly.css?v=' + v + '">')
     once(r'(<script src="js/game\.js\?v=\d+"></script>)', r'\1\n  <script src="../src/guard.js?v=' + v + '"></script>')
-    ours = '\n  '.join(f'<script src="../src/{f}.js?v={v}"></script>' for f in ('pilot', 'select', 'fmgc', 'fcu', 'mcdu', 'boot'))
+    ours = '\n  '.join(f'<script src="../src/{f}.js?v={v}"></script>' for f in ('pilot', 'select', 'data/navdata', 'fmgc', 'fcu', 'mcdu', 'boot'))
     once(r'<script src="js/flylink\.js\?v=\d+"></script>', ours)
     once(r'(<script type="module" async src="js/view3d\.js\?v=\d+"></script>)',
          r'<script type="module" src="../src/cockpit3d.js?v=' + v + r'"></script>\n  \1')

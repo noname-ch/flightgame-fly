@@ -33,6 +33,13 @@
 
   // ---------- the state ----------
   let S = null;
+  // More systems plug in here (src/aircraft.js: electrics, hydraulics, fuel, air, ADIRS, GPWS, ice; src/radio.js:
+  // the radios, the transponder and TCAS). Each may have: fresh(S, n) its part of the state; begin(S) where the crew
+  // would have its switches; set(what, v, i) → true when it took the switch; step(dt); warnings() / cautions() →
+  // names; proc(name, add, air) → the procedure's lines under its name on the E/WD; memo() → green memo names;
+  // starved(i) → true when engine i gets no fuel; lights(L) → the exterior lights after power; sd(c, W, H, page) →
+  // true when it drew that SD page; filter(w) → the HUD's warnings it leaves.
+  const plugins = [];
   const fresh = (n) => ({
     startAt: null,
     lt: { beacon: 1, strobe: 'AUTO', nav: 1, wing: 0, rwy: 1, land: 'ON', nose: 'TO', dome: 'OFF', integ: 0.8, flood: 0, ann: 'BRT' },
@@ -47,11 +54,12 @@
     random: false, nextRandom: 0,
     log: [], // what happened, for the systems page
   });
+  const freshAll = (n) => { const x = fresh(n); for (const p of plugins) if (p.fresh) p.fresh(x, n); return x; };
 
   // Starting positions of the switches: as a crew would have them for where the flight starts.
   function begin() {
     const sp = s.spec;
-    S = fresh(sp.engines);
+    S = freshAll(sp.engines);
     S.startAt = s.startAt;
     S.random = !!(prefs().random);
     S.nextRandom = 300 + Math.random() * 900;
@@ -62,6 +70,7 @@
     else Object.assign(L, { strobe: 'AUTO', land: low ? 'ON' : 'RETRACT', nose: low ? 'TO' : 'OFF', rwy: low ? 1 : 0 });
     S.signs.belts = low ? 1 : 0;
     L.dome = 'OFF';
+    for (const p of plugins) if (p.begin) p.begin(S);
     refreshAll();
   }
   function prefs() { try { return JSON.parse(localStorage.getItem('flightgame.fly.systems') || '{}'); } catch (e) { return {}; } }
@@ -102,7 +111,9 @@
   function note(text) { S.log.unshift({ text, at: s.flightT || 0 }); S.log.length = Math.min(S.log.length, 8); }
   const engName = (i) => `ENG ${i + 1}`;
   // Air for an engine start: the APU's bleed, another engine turning, or ram air fast enough to windmill it up.
-  const startAir = (i) => (S.apu.avail && S.apu.bleed) || S.eng.some((e, j) => j !== i && e.run === 1) || (!s.onGround && A.ias() > 220);
+  // (another engine's air only with its bleed valve open: src/aircraft.js S.air)
+  const engBleed = (j) => !S.air || !!S.air.engBleed[j];
+  const startAir = (i) => (S.apu.avail && S.apu.bleed) || S.eng.some((e, j) => j !== i && e.run === 1 && engBleed(j)) || (!s.onGround && A.ias() > 220);
   // The fuel to engine i is cut: master off, or its FIRE pushbutton pushed.
   const fuelCut = (e) => !e.master || e.firePb;
 
@@ -170,7 +181,8 @@
       case 'masterCaut': S.mc = false; S.cautAck = currentCautions().join('|'); break;
       case 'random': S.random = v !== undefined ? !!v : !S.random; savePrefs({ random: S.random }); break;
       case 'fail': fail(v, i); break;
-      default: return;
+      default:
+        if (!plugins.some((p) => p.set && p.set(what, v, i))) return;
     }
     refreshAll();
   }
@@ -196,7 +208,7 @@
     if (!S || !S.eng[i]) return null;
     const e = S.eng[i], idle = A.idle();
     e.n1 = n;
-    const off = fuelCut(e) || e.failed;
+    const off = fuelCut(e) || e.failed || plugins.some((p) => p.starved && p.starved(i)); // (no fuel reaching it: a flame-out)
     if (!off && e.run === 1) return null;
     // windmilling: the air turns the fan a little, more the faster it flies
     const wind = s.onGround ? 0 : clamp(A.ias() / 30, 0, 12);
@@ -264,8 +276,7 @@
     if (cauts && cauts !== S.cautAck && cauts !== S.cautSeen) { S.mc = true; snd.caution(); }
     S.cautSeen = cauts;
     if (!cauts) { S.mc = false; S.cautAck = ''; }
-    // the overhead page, now and then
-    if (page && !page.hidden && (S.pageAt = (S.pageAt || 0) + dt) > 0.25) { S.pageAt = 0; render(); }
+    for (const p of plugins) if (p.step) p.step(dt);
   }
 
   // Red warnings (each with its procedure) and amber cautions, for the E/WD and the HUD.
@@ -274,6 +285,7 @@
     const w = [];
     S.eng.forEach((e, i) => { if (e.fire) w.push(`${engName(i)} FIRE`); });
     if (S.apu.fire) w.push('APU FIRE');
+    for (const p of plugins) if (p.warnings) w.push(...p.warnings());
     return w;
   }
   function currentCautions() {
@@ -284,6 +296,7 @@
       if (e.failed) c.push(`${engName(i)} FAIL`);
       else if (!e.run && !e.start && !s.onGround) c.push(`${engName(i)} SHUT DOWN`);
     });
+    for (const p of plugins) if (p.cautions) c.push(...p.cautions());
     return c;
   }
   // The E/WD's lower half: [text, colour] lines. Red warnings with cyan actions still to do, then cautions, then
@@ -310,6 +323,7 @@
         add('-ATC ............... NOTIFY', 'cyan');
       } else add('-EVAC .............. INITIATE', 'cyan');
     });
+    for (const p of plugins) if (p.warnings) for (const w of p.warnings()) { add(w, 'red'); procOf(w, add, air); }
     if (S.apu.fire) {
       add('APU FIRE', 'red');
       if (!S.apu.firePb) add('-APU FIRE P/B ....... PUSH', 'cyan');
@@ -318,6 +332,7 @@
     }
     for (const c of currentCautions()) {
       add(c, 'amber');
+      procOf(c, add, air);
       if (/SHUT DOWN|FAIL/.test(c) && air) { add('-LAND ASAP', 'amber'); }
       if (/SHUT DOWN/.test(c) && air) add(`-RELIGHT: ENG MODE IGN, MASTER ON`, 'cyan');
     }
@@ -340,7 +355,9 @@
       pair('LDG GEAR', s.gear > 0.99, 'DN');
       pair('SIGNS', S.signs.belts && S.signs.smoke, 'ON');
       pair('SPLRS', !!s.armed, 'ARM');
-      pair('FLAPS', s.conf >= s.spec.conf.length - 1, s.spec.conf[s.spec.conf.length - 1].name);
+      const ldg3 = plugins.some((p) => p.ldgConf3 && p.ldgConf3()) && s.spec.conf.length > 2; // (GPWS LDG FLAP 3: CONF 3 is the landing flap)
+      const want = ldg3 ? s.spec.conf.length - 2 : s.spec.conf.length - 1;
+      pair('FLAPS', s.conf >= want, s.spec.conf[want].name);
     }
     if (out.length) return out;
     const memo = [];
@@ -354,9 +371,11 @@
     if (S.wingAntiIce) memo.push('WING A.ICE');
     if (s.parking) memo.push('PARK BRK');
     if (s.sb > 0 && air) memo.push('SPEED BRK');
+    for (const p of plugins) if (p.memo) memo.push(...p.memo());
     for (const m of memo) add(m, 'green');
     return out;
   }
+  const procOf = (name, add, air) => { for (const p of plugins) if (p.proc) p.proc(name, add, air); };
   // For the HUD's list (src/pilot.js warnings()).
   function warnings() {
     if (!ready()) return [];
@@ -373,147 +392,49 @@
     const strobe = L.strobe === 'ON' || (L.strobe === 'AUTO' && air);
     const land = L.land === 'ON' ? 1 : L.nose === 'TO' ? 0.8 : L.nose === 'TAXI' || L.rwy ? 0.5 : 0;
     const anyRun = S.eng.some((e) => e.run || e.start) || S.apu.avail;
-    return { nav: L.nav ? 1 : 0, beacon: L.beacon && anyRun ? 1 : 0, strobe: strobe ? 1 : 0, land, wing: L.wing ? 1 : 0 };
+    let out = { nav: L.nav ? 1 : 0, beacon: L.beacon && anyRun ? 1 : 0, strobe: strobe ? 1 : 0, land, wing: L.wing ? 1 : 0 };
+    for (const p of plugins) if (p.lights) out = p.lights(out) || out;
+    return out;
   }
 
   // ---------- keys (what src/pilot.js leaves free) ----------
   function key(k) {
     if (!ready()) return false;
-    if (k === '0') { show(!page || page.hidden); return true; }
+    if (k === '0') { show(!open(), 'overhead'); return true; }
+    if (k === '9') { show(!open('pedestal'), 'pedestal'); return true; }
+    for (const p of plugins) if (p.key && p.key(k)) return true;
     return false;
   }
   // ---------- checkpoints ----------
   const snapshot = () => (S ? structuredClone(S) : null);
   function restore(snap) { if (snap) { S = structuredClone(snap); refreshAll(); } }
 
-  // ---------- the overhead page (HTML): every switch, for any camera and type ----------
-  let page = null;
-  const listeners = new Set(); // (the 3D deck repaints its panels when a switch moves)
-  function refreshAll() { if (page && !page.hidden) render(); for (const f of listeners) try { f(); } catch (e) { /* */ } }
-  function show(on) {
-    if (!page) {
-      page = document.createElement('div');
-      page.id = 'fly-ovhd';
-      page.hidden = true;
-      const css = document.createElement('style');
-      css.textContent = `
-#fly-ovhd { position: fixed; right: 12px; top: 56px; z-index: 60; width: min(560px, calc(100vw - 24px)); max-height: calc(100vh - 120px); overflow: auto;
-  background: #3a3f46; color: #e9edf1; border: 2px solid #23262b; border-radius: 8px; box-shadow: 0 8px 32px rgba(0,0,0,.5);
-  font: 600 11px system-ui, sans-serif; padding: 8px 10px 10px; user-select: none; }
-#fly-ovhd h3 { margin: 0 0 6px; font-size: 12px; display: flex; justify-content: space-between; align-items: center; letter-spacing: .05em; }
-#fly-ovhd h3 button { background: #23262b; color: #cfd8e2; border: 0; border-radius: 4px; padding: 2px 8px; cursor: pointer; }
-#fly-ovhd .ov-sec { background: #4b5058; border: 1px solid #2a2d31; border-radius: 4px; margin: 6px 0; padding: 6px 6px 4px; }
-#fly-ovhd .ov-sec > b { display: block; text-align: center; color: #fff; font-size: 10px; letter-spacing: .12em; margin-bottom: 5px; border-bottom: 1px solid #fff4; padding-bottom: 2px; }
-#fly-ovhd .ov-row { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; }
-#fly-ovhd .ov-c { display: flex; flex-direction: column; align-items: center; gap: 3px; min-width: 58px; }
-#fly-ovhd .ov-c > span { font-size: 9px; color: #e9edf1; text-align: center; }
-#fly-ovhd button.pb { width: 46px; height: 40px; background: #0b0c0e; border: 2px solid #6c737c; border-radius: 2px; color: #3a4048; cursor: pointer;
-  display: flex; flex-direction: column; justify-content: space-between; align-items: center; padding: 3px 1px; font: 700 8px system-ui; }
-#fly-ovhd button.pb i { font-style: normal; height: 10px; }
-#fly-ovhd button.pb .t.on { color: #ffb000; text-shadow: 0 0 6px #ffb000; }
-#fly-ovhd button.pb .t.red { color: #ff3b30; text-shadow: 0 0 6px #ff3b30; }
-#fly-ovhd button.pb .b.on { color: #6fc8ff; text-shadow: 0 0 6px #6fc8ff; }
-#fly-ovhd button.pb .b.w { color: #fff; text-shadow: 0 0 6px #fff; }
-#fly-ovhd button.pb .b.g { color: #30d158; text-shadow: 0 0 6px #30d158; }
-#fly-ovhd button.pb.fire { width: 70px; height: 46px; background: #2a0d0b; border-color: #a12a1d; }
-#fly-ovhd button.pb.fire.lit { background: #a12a1d; color: #fff; box-shadow: 0 0 14px #ff3b30; }
-#fly-ovhd button.pb.fire.pushed { transform: translateY(3px); border-style: inset; }
-#fly-ovhd .sw { display: flex; flex-direction: column; border-radius: 3px; overflow: hidden; border: 1px solid #23262b; }
-#fly-ovhd .sw button { background: #2a2d31; border: 0; color: #9aa1aa; font: 700 8px system-ui; padding: 3px 6px; cursor: pointer; }
-#fly-ovhd .sw button.on { background: #d9dee4; color: #111; }
-#fly-ovhd .knob { width: 70px; }
-#fly-ovhd .apu { color: #30d158; font: 600 11px ui-monospace, monospace; }
-#fly-ovhd .log { color: #b9c4cf; font: 500 10px ui-monospace, monospace; white-space: pre-line; margin-top: 4px; }
-#fly-ovhd .fails button { background: #5a2a24; color: #ffd8d0; border: 1px solid #2a0d0b; border-radius: 3px; padding: 4px 6px; font: 700 9px system-ui; cursor: pointer; }
-#fly-ovhd .fails button.tog.on { background: #a12a1d; }
-`;
-      document.head.appendChild(css);
-      document.body.appendChild(page);
-      page.addEventListener('click', (ev) => {
-        const b = ev.target.closest('[data-s]');
-        if (!b) return;
-        const i = b.dataset.i === undefined ? undefined : b.dataset.i === 'apu' ? 'apu' : Number(b.dataset.i);
-        let v = b.dataset.v;
-        if (v !== undefined) v = /^-?\d+(\.\d+)?$/.test(v) ? Number(v) : v;
-        if (b.dataset.s === 'close') { show(false); return; }
-        set(b.dataset.s, v, i);
-      });
-      page.addEventListener('input', (ev) => { const r = ev.target; if (r.dataset.s) set(r.dataset.s, Number(r.value)); });
-      // the page's keys are the browser's, not the flying's
-      page.addEventListener('keydown', (ev) => ev.stopPropagation(), true);
-    }
-    page.hidden = !on;
-    if (on) render();
-  }
-  function render() {
-    if (!page || !ready()) return;
-    const L = S.lt;
-    const pb = (attrs, top, topOn, bot, botOn, cls = '') => `<button class="pb ${cls}" ${attrs}><i class="t ${topOn || ''}">${top}</i><i class="b ${botOn || ''}">${bot}</i></button>`;
-    const sw = (what, cur, opts, i) => `<div class="sw">${opts.map(([v, txt]) => `<button data-s="${what}" data-v="${v}"${i !== undefined ? ` data-i="${i}"` : ''} class="${String(cur) === String(v) ? 'on' : ''}">${txt}</button>`).join('')}</div>`;
-    const col = (label, inner) => `<div class="ov-c">${inner}<span>${label}</span></div>`;
-    const test = S.test > 0;
-    const fireBlock = (i, name) => {
-      const e = i === 'apu' ? S.apu : S.eng[i];
-      const lit = e.fire || test;
-      const agents = i === 'apu' ? [S.apu.agent] : e.agents;
-      return `<div class="ov-c">${pb(`data-s="firePb" data-i="${i}"`, name, '', 'FIRE', '', `fire ${lit ? 'lit' : ''} ${e.firePb ? 'pushed' : ''}`)}<span>${name} FIRE · PUSH</span>
-        <div class="ov-row">${agents.map((a, b) => pb(`data-s="agent" data-i="${i}" data-v="${b}"`, e.firePb && !a || test ? 'SQUIB' : '', e.firePb && !a || test ? 'w' : '', a || test ? 'DISCH' : '', a || test ? 'on' : '').replace('class="t w"', 'class="t" style="color:#fff;text-shadow:0 0 6px #fff"').replace('class="b on"', 'class="b" style="color:#ffb000;text-shadow:0 0 6px #ffb000"')).join('')}</div>
-        <span>${i === 'apu' ? 'AGENT' : 'AGENT 1 · AGENT 2'}</span></div>`;
-    };
-    const engs = S.eng.map((e, i) => i);
-    const apu = S.apu;
-    page.innerHTML = `<h3><span>OVERHEAD · ${s.spec.name}</span><span><button data-s="masterWarn" style="background:${S.mw ? '#a12a1d' : '#23262b'}">MASTER WARN</button> <button data-s="masterCaut" style="background:${S.mc ? '#a87412' : '#23262b'}">MASTER CAUT</button> <button data-s="close">✕ (0)</button></span></h3>
-      <div class="ov-sec"><b>FIRE</b><div class="ov-row">${engs.map((i) => fireBlock(i, `ENG ${i + 1}`)).join('')}${fireBlock('apu', 'APU')}
-        ${col('TEST', pb('data-s="fireTest"', '', '', 'TEST', test ? 'w' : ''))}</div></div>
-      <div class="ov-sec"><b>ENG</b><div class="ov-row">${engs.map((i) => col(`MASTER ${i + 1}${S.eng[i].fire || test ? ' · <span style="color:#ff3b30">FIRE</span>' : ''}${S.eng[i].failed ? ' · <span style="color:#ffb000">FAULT</span>' : ''}`, sw('master', S.eng[i].master, [[1, 'ON'], [0, 'OFF']], i))).join('')}
-        ${col('ENG MODE', sw('engMode', S.engMode, [['CRANK', 'CRANK'], ['NORM', 'NORM'], ['IGN', 'IGN START']]))}
-        ${col('N1', `<div class="apu">${s.n1.map((n, i) => `${i + 1}: ${n.toFixed(1)}%${S.eng[i].start ? ' ST' : ''}`).join('<br>')}</div>`)}</div></div>
-      <div class="ov-sec"><b>APU</b><div class="ov-row">
-        ${col('MASTER SW', pb('data-s="apuMaster"', apu.fire ? 'FAULT' : '', apu.fire ? 'on' : '', apu.master ? 'ON' : '', apu.master ? 'on' : ''))}
-        ${col('START', pb('data-s="apuStart"', '', '', apu.avail ? 'AVAIL' : apu.start ? 'ON' : '', apu.avail ? 'g' : apu.start ? 'on' : ''))}
-        ${col('APU BLEED', pb('data-s="apuBleed"', '', '', apu.bleed ? 'ON' : '', apu.bleed ? 'on' : ''))}
-        ${col('APU N', `<div class="apu">${Math.round(apu.n)} %${apu.avail ? '<br>AVAIL' : ''}</div>`)}</div></div>
-      <div class="ov-sec"><b>EXT LT</b><div class="ov-row">
-        ${col('STROBE', sw('strobe', L.strobe, [['ON', 'ON'], ['AUTO', 'AUTO'], ['OFF', 'OFF']]))}
-        ${col('BEACON', sw('beacon', L.beacon, [[1, 'ON'], [0, 'OFF']]))}
-        ${col('WING', sw('wing', L.wing, [[1, 'ON'], [0, 'OFF']]))}
-        ${col('NAV & LOGO', sw('nav', L.nav, [[1, 'ON'], [0, 'OFF']]))}
-        ${col('RWY TURN OFF', sw('rwy', L.rwy, [[1, 'ON'], [0, 'OFF']]))}
-        ${col('LAND', sw('land', L.land, [['ON', 'ON'], ['OFF', 'OFF'], ['RETRACT', 'RETRACT']]))}
-        ${col('NOSE', sw('nose', L.nose, [['TO', 'T.O'], ['TAXI', 'TAXI'], ['OFF', 'OFF']]))}</div></div>
-      <div class="ov-sec"><b>SIGNS · INT LT</b><div class="ov-row">
-        ${col('SEAT BELTS', sw('belts', S.signs.belts, [[1, 'ON'], [0, 'OFF']]))}
-        ${col('NO SMOKING', sw('smoke', S.signs.smoke, [[1, 'ON'], [0, 'OFF']]))}
-        ${col('DOME', sw('dome', L.dome, [['BRT', 'BRT'], ['DIM', 'DIM'], ['OFF', 'OFF']]))}
-        ${col('ANN LT', sw('ann', L.ann, [['TEST', 'TEST'], ['BRT', 'BRT'], ['DIM', 'DIM']]))}
-        ${col('INTEG LT', `<input class="knob" type="range" min="0" max="1" step="0.05" value="${L.integ}" data-s="integ">`)}
-        ${col('FLOOD LT', `<input class="knob" type="range" min="0" max="1" step="0.05" value="${L.flood}" data-s="flood">`)}</div></div>
-      <div class="ov-sec"><b>ANTI ICE · WIPER</b><div class="ov-row">
-        ${engs.map((i) => col(`ENG ${i + 1}`, pb(`data-s="engAntiIce" data-i="${i}"`, '', '', S.eng[i].antiIce ? 'ON' : '', S.eng[i].antiIce ? 'on' : ''))).join('')}
-        ${col('WING', pb('data-s="wingAntiIce"', '', '', S.wingAntiIce ? 'ON' : '', S.wingAntiIce ? 'on' : ''))}
-        ${col('WIPER CAPT', sw('wiper', S.wipers[0], [[2, 'FAST'], [1, 'SLOW'], [0, 'OFF']], 0))}
-        ${col('WIPER F/O', sw('wiper', S.wipers[1], [[2, 'FAST'], [1, 'SLOW'], [0, 'OFF']], 1))}</div></div>
-      <div class="ov-sec fails"><b>FAILURES (instructor)</b><div class="ov-row">
-        ${engs.map((i) => `<button data-s="fail" data-v="fire" data-i="${i}">ENG ${i + 1} FIRE</button>`).join('')}
-        <button data-s="fail" data-v="apuFire">APU FIRE</button>
-        ${engs.map((i) => `<button data-s="fail" data-v="fail" data-i="${i}">ENG ${i + 1} FAIL</button>`).join('')}
-        <button class="tog ${S.random ? 'on' : ''}" data-s="random">RANDOM ${S.random ? 'ON' : 'OFF'}</button></div>
-        <div class="log">${S.log.map((l) => l.text).join('\n')}</div></div>`;
-  }
+  // ---------- the panels as pages (src/panels.js draws them: the same modules as the 3D flight deck's) ----------
+  const listeners = new Set(); // (the 3D deck and the pages repaint their panels when a switch moves)
+  function refreshAll() { for (const f of listeners) try { f(); } catch (e) { /* */ } }
+  function show(on, which = 'overhead') { if (FG.panels) FG.panels.page(which, on); }
+  const open = (which = 'overhead') => !!(FG.panels && FG.panels.isOpen(which));
+
   // A button in the HUD's bar (it is made when the flight starts)
   const addBarButton = () => {
     const bar = document.querySelector('#pilot-hud .pl-bar');
     if (!bar || bar.querySelector('[data-pl="ovhd"]')) return;
     const b = document.createElement('button');
     b.dataset.pl = 'ovhd'; b.title = 'Overhead panel: lights, signs, APU, engines, fire (0)'; b.textContent = '🔆 Overhead';
-    b.addEventListener('click', (ev) => { ev.stopPropagation(); if (ready()) show(!page || page.hidden); b.blur(); });
+    b.addEventListener('click', (ev) => { ev.stopPropagation(); if (ready()) show(!open()); b.blur(); });
     bar.insertBefore(b, bar.querySelector('[data-pl="help"]'));
   };
-  setInterval(() => { if (s.active) addBarButton(); else { if (page && !page.hidden) show(false); crc(false); } }, 500);
+  setInterval(() => { if (s.active) addBarButton(); else { if (FG.panels) FG.panels.closeAll(); crc(false); } }, 500);
 
   FG.systems = {
     get S() { return S; }, ready, set, engine, step, warnings, lights, ecamLines, key, snapshot, restore, show,
-    currentWarnings, currentCautions, onChange(f) { listeners.add(f); },
-    get open() { return !!page && !page.hidden; },
+    currentWarnings, currentCautions, onChange(f) { listeners.add(f); }, refresh: refreshAll, note: (t) => S && note(t),
+    get open() { return open(); },
+    // the HUD's warnings after the plug-ins' filters (the GPWS switched off)
+    filter(w) { for (const p of plugins) if (p.filter) w = p.filter(w); return w; },
+    // an SD page a plug-in draws (true when one did)
+    sd(c, W, H, page) { return ready() && plugins.some((p) => p.sd && p.sd(c, W, H, page)); },
+    plug(p) { plugins.push(p); if (S && p.fresh) { p.fresh(S, S.eng.length); if (p.begin) p.begin(S); } },
+    snd, tone,
   };
 })();

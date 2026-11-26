@@ -22,7 +22,8 @@
     el.innerHTML = `
       <div class="fcu-efis">
         <div class="fcu-title">EFIS</div>
-        <div class="fcu-row">${btn('FD', 'FD')}${btn('LS', 'LS')}${btn('ARPT', 'ARPT')}</div>
+        <div class="fcu-row">${btn('FD', 'FD')}${btn('LS', 'LS')}</div>
+        <div class="fcu-row">${['CSTR', 'WPT', 'VOR.D', 'NDB', 'ARPT'].map((o) => btn(`ND ${o}`, o, 'fcu-opt')).join('')}</div>
         <div class="fcu-row"><button class="fcu-sel" data-btn="NDMODE" title="ND mode">ARC</button>
           <button class="fcu-sel" data-btn="RNG-" title="ND range">−</button><span class="fcu-rng">40</span><button class="fcu-sel" data-btn="RNG+" title="ND range">+</button></div>
       </div>
@@ -130,7 +131,8 @@
     // lights
     light('AP1', F.ap1); light('AP2', F.ap2); light('ATHR', s.athr && s.spec && s.spec.athr);
     light('LOC', F.locBtn && !F.appr); light('APPR', F.appr); light('EXPED', F.exped);
-    light('FD', F.fd); light('LS', F.ls); light('ARPT', F.nd.arpt);
+    light('FD', F.fd); light('LS', F.ls);
+    for (const o of ['CSTR', 'WPT', 'VOR.D', 'NDB', 'ARPT']) light(`ND ${o}`, F.nd.opt === o);
     for (const m of ['LO', 'MED', 'MAX']) {
       const n = q(`[data-btn="BRK ${m}"]`);
       n.classList.toggle('lit', F.abrk === m);
