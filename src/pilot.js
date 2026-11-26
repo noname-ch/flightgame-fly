@@ -1213,7 +1213,10 @@
     if (kind === 'tip' || kind === 'wing') {
       const i = side < 0 ? 0 : 1, cut = kind === 'tip' ? PART_TIP : PART_WING;
       if (d.cut[i] && d.cut[i] <= cut) return false;
-      addPiece({ kind: 'wing', side, cut, out: d.cut[i] || 0 }, kind === 'tip' ? 28 : 45, onGround);
+      // (torn off on the ground it doesn't fly on: it digs in and tumbles to a stop)
+      const vh = s.V * Math.cos(s.gamma), ps = s.psi * DEG, k = onGround ? 0.5 : 1;
+      addPiece({ kind: 'wing', side, cut, out: d.cut[i] || 0 }, kind === 'tip' ? 28 : 45, onGround,
+        onGround ? { v: [vh * k * Math.sin(ps), vh * k * Math.cos(ps), 0], mu: 1.4 } : {});
       d.cut[i] = cut;
       if (kind === 'wing' && sp.engines === 4 && !sp.delta) d.engOut.push(side < 0 ? 0 : 3);
       // (both wings broken: nothing holds it up or steady any more)
@@ -1362,8 +1365,11 @@
     const sp = s.spec, d = s.dmg, slide = !!o.slide;
     const fuel = clamp(Math.sqrt(s.mass / 70000), 0.5, 2.2); // (the bigger the aircraft, the more fuel it carries)
     const vRot = sp.vr * KT;
-    const fate = vn > 30 || (!slide && (V > 80 || vn > 25)) ? 'gone'
-      : (slide && (vn > 7 || vh > 1.2 * vRot)) || (!slide && V > 30) ? 'break' : 'whole';
+    // (gone: steep, or very fast into the ground sinking past what the gear takes)
+    const fate = vn > 30 || (!slide && (V > 80 || vn > 25)) || (slide && vh > 1.6 * vRot && vn > 0.9 * sp.crashFpm * FT / 60) ? 'gone'
+      // (hitting the ground past the sink rate the gear takes breaks it up; only a belly landing or a gear that
+      // folds at a landing's sink rate slides on in one piece)
+      : (slide && (vn > 0.9 * sp.crashFpm * FT / 60 || vh > 1.2 * vRot || (o.dig && vh > 20) || (o.fast && vn > 2))) || (!slide && V > 20) ? 'break' : 'whole';
     const rnd = (a) => (Math.random() * 2 - 1) * a;
     const along = (speed, turn, up = 0) => [speed * Math.sin(trk + turn), speed * Math.cos(trk + turn), up];
     let tail = '';
@@ -1374,7 +1380,7 @@
       // what's thrown clear: big pieces at a few hundred km/h; at airliner cruise speeds only small ones
       const small = V > 140 || vn > 90;
       const throwIt = (part, f, vt, mu) => addPiece(part, vt, false,
-        { v: along(V * f * (0.7 + 0.6 * Math.random()), rnd(0.35), 6 + Math.random() * 14), w: [rnd(3), rnd(5), rnd(5)], mu, burn: 0.85 });
+        { v: along(V * f * (0.4 + 0.4 * Math.random()), rnd(0.35), 4 + Math.random() * 8), w: [rnd(3), rnd(5), rnd(5)], mu: mu * 1.5, burn: 0.85 });
       if (small) {
         if (!d.rud) throwIt({ kind: 'rud', side: 0 }, 0.45, 26, 0.7);
         if (d.elev !== 2) throwIt({ kind: 'elev', side: 0 }, 0.4, 26, 0.7);
@@ -1386,16 +1392,22 @@
       }
       tail = ': it went up in a fireball';
     } else {
-      const nose = fate === 'break' && (vn > 12 || vh > 1.4 * vRot || !slide);
-      const go = slide ? vh : 0.35 * V; // (into a hillside: what's left ploughs on a little)
+      const nose = fate === 'break' && (vn > 9 || vh > 1.4 * vRot || !slide || Math.random() < 0.35);
+      // The impact itself takes much of the speed (the gear and the belly crushing, the wing digging in), then it
+      // skids: on a runway on its belly (about 0.6 g), off it the grass and earth pile up in front and stop it far
+      // sooner (twice as hard); a broken airframe digs in more. Into a hillside what's left ploughs on a little.
+      const paved = onRunway();
+      const ground = paved ? 1 : 2;
+      const go = slide ? vh * (fate === 'break' ? 0.55 : 0.7) : 0.2 * V;
+      const mu = (fate === 'break' ? 0.9 : o.dig ? 0.8 : 0.6) * ground;
       if (fate === 'break') {
         const flags = (d.elev === 2 ? 1 : 0) + (d.rud ? 2 : 0);
         // the tail: torn off behind the wing, it stops first, turned across
-        addPiece({ kind: 'body', side: -1, flags }, 40, true, { v: along(go * 0.93, rnd(0.2)), w: [rnd(0.9), rnd(0.4), 0], mu: 0.65, burn: 0.1 });
+        addPiece({ kind: 'body', side: -1, flags }, 40, true, { v: along(go * 0.8, rnd(0.2)), w: [rnd(0.9), rnd(0.4), 0], mu: mu * 1.2, burn: 0.1 });
         d.body[1] = 1;
         if (nose) {
           // the nose: ahead of the wing, it slides on furthest, a little to one side
-          addPiece({ kind: 'body', side: 1 }, 45, true, { v: along(go * 0.98, rnd(0.25)), w: [rnd(0.5), rnd(0.3), 0], mu: 0.5, burn: 0.15 });
+          addPiece({ kind: 'body', side: 1 }, 45, true, { v: along(go * 1.05, rnd(0.25)), w: [rnd(0.5), rnd(0.3), 0], mu: mu, burn: 0.15 });
           d.body[0] = 1;
         }
         blast(fuel * 0.9);
@@ -1409,7 +1421,7 @@
         s.burnAt = performance.now();
       }
       s.wreck = go > 3 ? { v: go, trk: trk / DEG, hdg: s.psi, spin: o.spin || 0, bank: s.phi, pitch: s.theta,
-        side: Math.sign(s.phi) || 1, dug: Math.abs(o.spin || 0) > 60, mu: fate === 'break' ? 0.6 : 0.45 } : null;
+        side: Math.sign(s.phi) || 1, dug: Math.abs(o.spin || 0) > 60, mu: mu / ground } : null;
     }
     // (the gear folds under it: it lies on its belly)
     if (V > 15 || s.gear < 0.99) { s.belly = true; s.gear = 0; s.gearDown = false; }
@@ -1433,7 +1445,8 @@
   function wreckStep(dt) {
     const w = s.wreck;
     if (w.v <= 0) { startFire(); return; }
-    w.v = Math.max(0, w.v - w.mu * G0 * dt); // (on its belly, or a stub of wing: hard)
+    // (on its belly, or a stub of wing: hard; off the runway twice as hard)
+    w.v = Math.max(0, w.v - w.mu * (onRunway() ? 1 : 2) * G0 * dt);
     w.hdg = wrap360(w.hdg + w.spin * dt);
     w.spin *= Math.exp(-dt / 2.5);
     // it settles: level on its belly, or down on the side whose wing broke
@@ -1486,6 +1499,8 @@
     if (hill) why = `Flew into the ${slope > 0.25 ? 'mountainside' : 'hillside'} at ${Math.round(ias())} kt`;
     else if (fpm < -sp.crashFpm * 2.5) why = `Hit the ground at ${Math.round(-fpm)} ft/min`;
     else if (Math.abs(s.phi) > sp.tipBank + 5) { why = `The ${sideName} wing dug in at ${Math.round(Math.abs(s.phi))}° of bank and broke off: it cartwheeled`; dig = true; }
+    // far above any landing speed and still sinking: the gear (and the belly) can't take it, it is no landing
+    else if (ias() > 1.22 * sp.finalKt && fpm < -250) why = `Flew into the ${onRunway() ? 'runway' : 'ground'} at ${Math.round(ias())} kt${s.gear < 0.1 ? ' with the gear up' : ''}`;
     else if (s.gear < 0.99) why = s.gear < 0.1 ? 'Gear-up landing' : 'The gear was not down and locked';
     else if (fpm < -sp.crashFpm) why = `Hit the ground at ${Math.round(-fpm)} ft/min`;
     else if (Math.abs(s.phi) > sp.tipBank && sp.engine !== 'piston' && Math.abs(s.phi) > sp.tipBank + 2 && s.spec.engines >= 4) why = 'A wing tip and an engine hit the ground';
@@ -1493,7 +1508,7 @@
     else if (s.V > sp.tyreKt * KT) why = 'Far too fast for the tyres';
     if (why) {
       if (dig) breakOff('wing', side, null, true);
-      crash(why, { slide: !hill, dig, vz: vs, spin: dig ? side * (90 + 60 * Math.random()) : (Math.random() - 0.5) * 30, hard: -fpm });
+      crash(why, { slide: !hill, dig, vz: vs, fast: ias() > 1.22 * sp.finalKt, spin: dig ? side * (90 + 60 * Math.random()) : (Math.random() - 0.5) * 30, hard: -fpm });
       return;
     }
     // a wing tip that touches the runway (a little past the bank it clears) is torn off; the rest of it lands
