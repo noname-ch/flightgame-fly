@@ -75,6 +75,7 @@ Sixteen aircraft, each flying in its own way:
   like a brick (stick shaker at 17°); its high-incidence protection keeps it under 20° (limiter). Reheat at the
   take-off detent (4) for the take-off and through Mach 1, then Mach 2 at 50,000 ft. Hands off after take-off with
   reheat it pitches up and swings, as the real one would: fly the attitude and take the reheat out. No spoilers.
+  Each engine running at full thrust with the reheat lit shows its flame out of the nozzle, shock diamonds and all.
 - **Dash 8-400, ATR 72-600**: turboprops. The propellers answer the levers at once (torque, TQ %) and pull hardest
   when slow; reverse is the propellers' beta. No autothrust. The ATR has no spoilers and only 250 kt at most.
 - Every type has its weight: the roll and the pitch take a moment to get going and to stop (about a second on the
@@ -232,6 +233,11 @@ outer wings, elevators and rudder, and its fuselage into the nose, the middle an
   strikes, which fails the engine and often sets it on fire (the overhead's FIRE drill: `src/systems.js`); deeper the
   outer wing breaks off and its tank catches fire; dug in up to its middle it cartwheels. The ground drags the wing
   back (it yaws towards it and slows) and pushes it up (the bank comes off), so a light strike can be flown away.
+- **Fuel fires:** a wing that breaks off tears its tanks open (nearly always; a wing tip, which holds little fuel,
+  sometimes): the fuel streams out of the stump and burns, a trail of fire and black smoke behind the aircraft for a
+  minute or two, and the part that came off burns as it falls and where it lands. A wing dragged along the ground at
+  speed can wear through into its tank the same way. A fire in a wing that is still on burns through it in half a
+  minute to a minute and it breaks off.
 - **The crash** is worked out each time from what happened: the sink rate against what the gear takes, the speed
   along the ground (the more it was sinking, the more the belly and engines dig in), runway, grass or a hillside,
   nose down, a wing down or dug in. That gives how hard it hit, and each part fails at its own strength with some
@@ -244,7 +250,10 @@ outer wings, elevators and rudder, and its fuselage into the nose, the middle an
   - The impact throws out a shower of fragments, from a few to hundreds, in the livery's colours, bare metal and soot,
     each with its own momentum (the game's `js/view3d.js` updateDebris).
   - The fuel goes up in a fireball as big as the fuel and the impact, rising as it burns, and goes on burning with
-    black smoke where the wreck stops; the wreck chars. After a crash the view goes to the chase camera.
+    black smoke where the wreck stops; the wreck chars. The fireball keeps a little of the speed along the ground: it
+    rolls on the way the aircraft was going, the faster, the further.
+  - Sliding on its belly, the tanks under the wing roots tear open (the harder it hit, the likelier; always with a wing
+    torn off): the wreck drags a trail of burning fuel behind it until it stops. After a crash the view goes to the chase camera.
 
 To practise, the Esc menu has **Failures**: a wing tip (left or right), the elevator jamming, the elevators or the
 rudder breaking off, the left wing breaking. Checkpoints (Z) keep the damage too.

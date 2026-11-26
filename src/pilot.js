@@ -1000,7 +1000,8 @@
   // its own (s.pieces) and the 3D view draws it, with the aircraft without it.
   const PART_TIP = 0.8, PART_WING = 0.5;
   const CL_AIL = 0.045; // rolling moment (per q·S·span) of the ailerons at full throw
-  function noDamage() { return { cut: [0, 0], elev: 0, elevOff: 0, rud: 0, engOut: [], thrPrev: null, body: [0, 0], pod: [] }; }
+  // leak: seconds of fuel left burning out of each wing (left, right) where a tank tore open; fireT: how long it has burned
+  function noDamage() { return { cut: [0, 0], elev: 0, elevOff: 0, rud: 0, engOut: [], thrPrev: null, body: [0, 0], pod: [], leak: [0, 0], fireT: [0, 0] }; }
   // the share of a half wing's lift beyond a break at `cut` half spans (an elliptical spread of lift), and how far out
   // (in half spans) it acted on average
   function lostLift(cut) {
@@ -1149,6 +1150,8 @@
       breakOff('wing', side, `The ${nm} wing hit the ground at ${kt} kt and broke off`, true);
       fuelFire(side, 'The wing\'s fuel tank ruptured: fire');
     }
+    // dragged along the ground at speed, the wing's skin wears through into the tank: fuel pours out and burns
+    if (!d.leak[k] && s.V > 30 && dTip > 0.3 && Math.random() < dt * 0.7 * clamp(dTip, 0.3, 2)) fuelFire(side, `The ${nm} wing's fuel tank ruptured on the ground: fire`);
     // the engines under that wing
     for (const e of pods()) {
       if (e.side !== side || d.pod.includes(e.i) || d.engOut.includes(e.i)) continue;
@@ -1170,10 +1173,27 @@
   }
   // A fuel fire in what's left of a wing (or the APU's for a wing without an engine): the engine on that side.
   function fuelFire(side, why) {
+    const k = side < 0 ? 0 : 1;
+    s.dmg.leak[k] = Math.max(s.dmg.leak[k], 40 + 60 * Math.random());
     const e = pods().filter((p) => p.side === side).sort((a, b) => a.f - b.f)[0];
     if (!e || !FG.systems || !FG.systems.ready || !FG.systems.ready()) return;
     FG.systems.set('fail', 'fire', e.i);
     if (why) say(why, 'red', 6000);
+  }
+
+  // The fuel burning out of a torn wing (d.leak) burns down; on a wing still there (its tip gone, or worn through
+  // on the ground) the fire weakens the spar until, in half a minute to a minute, the wing breaks off.
+  function fireStep(dt) {
+    const d = s.dmg;
+    for (const k of [0, 1]) {
+      if (!(d.leak[k] > 0)) { d.fireT[k] = 0; continue; }
+      d.leak[k] = Math.max(0, d.leak[k] - dt);
+      d.fireT[k] += dt;
+      if (!s.crashed && !s.tumble && !(d.cut[k] && d.cut[k] <= PART_WING) && d.fireT[k] > (d.burnsAt ||= [35 + 35 * Math.random(), 35 + 35 * Math.random()])[k]) {
+        const side = k ? 1 : -1;
+        breakOff('wing', side, `The fire burned through the ${sideName(side)} wing: it broke off`, s.onGround);
+      }
+    }
   }
 
   // the airframe's limits: past 1.3 × its limit load a wing tip tears off, past 1.5 × (its ultimate load) a wing
@@ -1221,6 +1241,13 @@
       addPiece({ kind: 'wing', side, cut, out: d.cut[i] || 0 }, kind === 'tip' ? 28 : 45, onGround,
         P ? P() : onGround ? { v: [vh * k * Math.sin(ps), vh * k * Math.cos(ps), 0], mu: 1.4 } : {});
       d.cut[i] = cut;
+      // (the wing's tanks are torn open: the fuel streams out of the stump and burns, a trail of fire behind it, and
+      // the part that came off burns as it falls; a tip holds little fuel, its fire seldom catches)
+      const r = Math.random();
+      if (kind === 'wing' ? onGround || r < 0.8 : r < (onGround ? 0.5 : 0.3)) {
+        d.leak[i] = Math.max(d.leak[i], kind === 'wing' ? 50 + 80 * Math.random() : 12 + 20 * Math.random());
+        s.pieces[s.pieces.length - 1].fire = kind === 'wing' ? 25 + 40 * Math.random() : 8 + 10 * Math.random();
+      }
       if (kind === 'wing' && sp.engines === 4 && !sp.delta) d.engOut.push(side < 0 ? 0 : 3);
       // (both wings broken: nothing holds it up or steady any more)
       if (d.cut[0] && d.cut[1] && d.cut[0] <= PART_WING && d.cut[1] <= PART_WING && !s.onGround) startTumble(why || 'Both wings broke off');
@@ -1261,12 +1288,23 @@
     const w = o.w ? [...o.w] : onGround ? [rnd(1.2), rnd(1.5), rnd(0.8)]
       : part.kind === 'wing' ? [rnd(1.5), out * (3 + Math.random() * 4), rnd(4)] : [rnd(3), rnd(6), rnd(6)];
     s.pieces.push({ id: `p${++pieceN}`, part, d: [0, 0, 0], v, rot: [0, 0, 0], w, vt, h0: s.h, g0: s.groundH, rest: false, age: 0,
-      mu: o.mu ?? 0.8, burn: o.burn || 0 });
+      mu: o.mu ?? 0.8, burn: o.burn || 0, lat0: s.lat, lon0: s.lon, fire: o.fire || 0 });
     if (s.pieces.length > 20) s.pieces.shift();
   }
   function piecesStep(dt) {
     for (const q of s.pieces) {
       q.age += dt;
+      if (q.fire > 0) {
+        q.fire -= dt;
+        q.burn = Math.min(0.9, (q.burn || 0) + dt / 40); // (charred as it burns)
+        // (come to rest still burning: the fuel in it burns on where it lies)
+        if (q.rest && q.fire > 3 && G.blasts) {
+          G.blasts.push({ id: 'fly', lat: q.lat0 + q.d[1] / R_E / DEG, lon: q.lon0 + q.d[0] / (R_E * Math.cos(q.lat0 * DEG)) / DEG, altM: q.g0, real: true,
+            scale: q.part.kind === 'wing' && q.part.cut <= PART_WING ? 0.35 : 0.2, kind: 'pool', secs: Math.min(240, q.fire * 3) });
+          if (G.blasts.length > 10) G.blasts.shift();
+          q.fire = 0;
+        }
+      }
       if (q.rest) continue;
       const floor = q.g0 - q.h0; // (d up where it lies on the ground: the wheels' height where it broke off, js/view3d.js lays it flat)
       const v = q.v;
@@ -1393,7 +1431,8 @@
     // a part's own way on: the aircraft's momentum less what the impact took, a little aside, up and spinning
     const spread = Math.min(0.8, 0.05 + 0.05 * S), spin = Math.min(6, 0.3 + 0.4 * S);
     const fling = (mu, toss = 1) => () => {
-      const keep = slide ? Math.max(0, vh - (0.6 + 0.8 * r()) * vn) * (0.85 + 0.2 * r()) : V * (0.1 + 0.3 * r());
+      // (however steep it went in, some of the speed along the ground carries on)
+      const keep = Math.max(vh * (0.1 + 0.2 * r()), slide ? Math.max(0, vh - (0.6 + 0.8 * r()) * vn) * (0.85 + 0.2 * r()) : V * (0.1 + 0.3 * r()));
       const dir = trk + rnd(spread);
       const up = Math.min(30, vn * (0.05 + 0.25 * r()) + toss * S * r());
       return { v: [keep * Math.sin(dir), keep * Math.cos(dir), up], w: [rnd(spin), rnd(spin), rnd(spin)], mu: mu * grip,
@@ -1420,7 +1459,10 @@
     if (!gone) {
       const go = slide ? Math.max(0, vh - (0.8 + 0.4 * r()) * vn) : 0.2 * V;
       s.wreck = go > 2 ? { v: go, trk: trk / DEG, hdg: s.psi, spin: (o.spin || 0) + rnd(4 * S), bank: s.phi, pitch: s.theta,
-        side: Math.sign(s.phi) || 1, dug: Math.abs(o.spin || 0) > 60, mu: S < 1 ? 0.7 : 0.85 } : null;
+        side: Math.sign(s.phi) || 1, dug: Math.abs(o.spin || 0) > 60, mu: S < 1 ? 0.7 : 0.85, fire: 0 } : null;
+      // sliding on its belly the tanks under the wing roots tear open (the harder it hit, the likelier): it drags
+      // a trail of burning fuel behind it until it stops, then burns where it lies
+      if (s.wreck && (d.cut.some((c) => c && c <= PART_WING) || (S > 0.45 && r() < clamp((S - 0.35) * 1.3, 0, 1)))) s.wreck.fire = clamp(0.45 + 0.25 * S, 0.45, 1);
     }
     // the fragments
     const n = Math.round(clamp(30 * Math.max(0, S - 0.4) ** 1.5, 0, 700));
@@ -1431,8 +1473,9 @@
     }
     // fire: the fuel goes up where it hit, and burns on where the wreck stops
     const torn = d.cut.some((c) => c && c <= PART_WING) || o.dig;
-    if (S > 0.9 || torn) blast(fuel * clamp(0.35 + 0.22 * S, 0.4, 2.2));
-    if (S > 1.3 || torn) { s.fire = { scale: fuel * clamp(0.4 + 0.1 * S, 0.4, 1.2), secs: Math.min(400, 150 + 30 * S) }; s.burnAt = performance.now(); }
+    // (the fireball keeps some of the speed along the ground: it rolls on a little the way the aircraft was going)
+    if (S > 0.9 || torn) blast(fuel * clamp(0.35 + 0.22 * S, 0.4, 2.2), null, null, [0.6 * vh * Math.sin(trk), 0.6 * vh * Math.cos(trk)]);
+    if (S > 1.3 || torn || (s.wreck && s.wreck.fire)) { s.fire = { scale: fuel * clamp(0.4 + 0.1 * S, 0.4, 1.2), secs: Math.min(400, 150 + 30 * S) }; s.burnAt = performance.now(); }
     // what it says
     let tail2 = '';
     if (gone) tail2 = S > 12 ? ': it disintegrated in a fireball' : ': it broke up in a fireball';
@@ -1447,15 +1490,20 @@
     s.tumble = null;
     s.onGround = true;
     s.V = 0; s.lever = 0; s.n1 = s.n1.map(() => IDLE_N1);
+    if (!s.wreck) { // (stopped where it hit: what burns, burns there)
+      if (!s.fire && !gone && (d.leak[0] > 3 || d.leak[1] > 3)) { s.fire = { scale: 0.4, secs: Math.max(...d.leak) * 2 }; s.burnAt = performance.now(); }
+      d.leak = [0, 0];
+    }
     if (s.fire && !s.wreck) startFire();
     // (from inside, the fireball is round the camera and nothing shows: out to the chase camera to see it)
     if (s.cam !== 'chase' && FG.view3d && FG.view3d.pilotCam) FG.view3d.pilotCam(s.cam = 'chase');
     speak('crash');
   }
   // the game's crash blasts (js/view3d.js updateBlasts), in real time: a fireball, or a fire burning on (pool)
-  function blast(scale, kind, secs) {
+  // (v: m/s east, north the fire is carried along with)
+  function blast(scale, kind, secs, v) {
     if (!G.blasts) return;
-    G.blasts.push({ id: 'fly', lat: s.lat, lon: s.lon, altM: s.groundH, real: true, scale, kind, secs });
+    G.blasts.push({ id: 'fly', lat: s.lat, lon: s.lon, altM: s.groundH, real: true, scale, kind, secs, v });
     if (G.blasts.length > 10) G.blasts.shift();
   }
   function startFire() {
@@ -1465,7 +1513,12 @@
   }
   function wreckStep(dt) {
     const w = s.wreck;
-    if (w.v <= 0) { startFire(); return; }
+    if (w.v <= 0) {
+      // (still burning out of a torn wing where it stopped: that fuel burns on there)
+      if (!s.fire && (s.dmg.leak[0] > 3 || s.dmg.leak[1] > 3)) s.fire = { scale: 0.4, secs: Math.max(...s.dmg.leak) * 2 };
+      s.dmg.leak = [0, 0]; w.fire = 0;
+      startFire(); return;
+    }
     // (on its belly, or a stub of wing: hard; off the runway twice as hard)
     w.v = Math.max(0, w.v - w.mu * (onRunway() ? 1 : 2) * G0 * dt);
     w.hdg = wrap360(w.hdg + w.spin * dt);
@@ -1642,7 +1695,7 @@
       if (Math.abs(gh - s.groundH) > 60 && !s.onGround) s.groundH = gh;
       else s.groundH += (gh - s.groundH) * (1 - Math.exp(-dtAll / (s.onGround ? 0.25 : 0.08)));
     }
-    if (!s.paused && !s.menu) piecesStep(Math.min(dtAll, 0.1));
+    if (!s.paused && !s.menu) { piecesStep(Math.min(dtAll, 0.1)); fireStep(Math.min(dtAll, 0.1)); }
     if (!s.paused && !s.menu && s.crashed && s.wreck) wreckStep(Math.min(dtAll, 0.1));
     else if (s.crashed && s.fire) startFire();
     if (!s.paused && !s.menu && !s.crashed) {
@@ -1673,13 +1726,17 @@
       // what broke off (js/view3d.js drawPilot, js/livery.js PARTS) and the parts falling away or lying about
       dmg: { cut: s.dmg.cut, elev: s.dmg.elevOff, rud: s.dmg.rud ? 1 : 0, body: s.dmg.body },
       pieces: s.pieces.map((q) => ({ id: q.id, part: q.part.kind === 'body' ? { ...q.part, out: q.part.flags || 0 } : q.part, d: q.d, rot: q.rot, age: q.age,
-        down: q.d[2] <= q.g0 - q.h0 + 0.05, burn: q.burn })),
+        down: q.d[2] <= q.g0 - q.h0 + 0.05, burn: q.burn, fire: q.fire > 0 ? clamp(q.fire / 8, 0.25, 1) : 0 })),
+      // burning fuel (js/view3d.js fire trails): out of each torn or worn-through wing, and from under the wreck sliding along
+      fire: s.gone ? null : { wing: s.dmg.leak.map((l) => (l > 0 ? clamp(l / 10, 0.3, 1) : 0)), cut: s.dmg.cut, slide: s.wreck && s.wreck.v > 1 ? s.wreck.fire : 0 },
       gone: s.gone, // (destroyed on impact: nothing left to draw)
       belly: !!(s.crashed && s.belly), // (the gear folded: on its belly)
       burn: s.burnAt ? clamp((performance.now() - s.burnAt) / 90000, 0.05, 0.8) : 0, // (charred by the fire round it)
       st: { phase, speedKmh: kmh, altFt: s.h / FT, fieldFt: s.groundH / FT, ground: s.onGround, windKt: s.wind ? s.wind.kt : 0, windFrom: s.wind ? s.wind.from : 0, gusty: !!(s.wind && s.wind.gusty), airFrac: 0 },
       pilot: { gear: s.gear, flap: confAt(s.flapPos).flap, ail: s.roll, elev: s.onGround ? s.stick : s.stick * 0.7, rud: s.onGround ? s.rud : s.rud, rev: s.rev, n1: s.n1.reduce((x, y) => x + y, 0) / s.n1.length, gamma: s.gamma / DEG, vs,
         nz: (s.load || 0) + bf * 0.25 * Math.sin(tb * 13), stall: s.stallAmt || 0,
+        // Concorde's reheat: lit on each engine running at full thrust with the levers at the take-off detent
+        reheat: s.spec.reheat && !s.crashed ? s.n1.map((n, i) => (s.lever > 0.98 && n > 88 && !s.dmg.engOut.includes(i) ? 1 : 0)) : null,
         lights: s.crashed ? { nav: 0, beacon: 0, strobe: 0, land: 0, wing: 0 } : FG.systems ? FG.systems.lights() : null }, // (the overhead's switches: src/systems.js; a wreck: dark)
     };
   }
