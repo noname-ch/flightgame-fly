@@ -332,6 +332,28 @@ try {
   await waitFor(() => FG.pilot.state.n1[0] < FG.pilot.state.spec.idle - 5, 20000, 'ENG 1 to run down (its fuel cut)');
   await look(0, 0);
 
+  step('the cockpit views: Ctrl + arrows move the head and the seat (overhead, pedestal, the first officer, the window)');
+  {
+    const ctrl = (k) => evaluate((k) => { for (const type of ['keydown', 'keyup']) window.dispatchEvent(new KeyboardEvent(type, { key: k, ctrlKey: true, bubbles: true })); }, k);
+    const state = () => evaluate(() => ({ yaw: FG.view3d.look.yaw, pitch: FG.view3d.look.pitch, x: FG.cockpit3d.EYE_X }));
+    const settle = async () => { for (let i = 0; i < 40; i++) { await evaluate(() => FG.view3d.map.triggerRepaint()); await sleep(100); } };
+    await ctrl('Home'); await settle();
+    const x0 = (await state()).x;
+    await ctrl('ArrowUp'); await settle(); await shot('view-overhead');
+    let st = await state();
+    if (st.pitch < 50) errors.push(`Ctrl+↑ did not look up at the overhead: ${JSON.stringify(st)}`);
+    await ctrl('ArrowDown'); await ctrl('ArrowDown'); await ctrl('ArrowRight'); await settle(); await shot('view-pedestal');
+    st = await state();
+    if (st.pitch > -30 || Math.abs(st.x) > 0.05) errors.push(`Ctrl+↓↓→ did not look at the pedestal from the middle: ${JSON.stringify(st)}`);
+    await ctrl('ArrowUp'); await ctrl('ArrowRight'); await settle(); await shot('view-fo');
+    st = await state();
+    if (!(st.x < -0.3 && x0 > 0.3)) errors.push(`Ctrl+↑→ did not move to the first officer's seat: ${JSON.stringify(st)} (captain ${x0})`);
+    await ctrl('ArrowRight'); await settle(); await shot('view-right-window');
+    st = await state();
+    if (st.yaw < 60) errors.push(`Ctrl+→ did not look out of the right window: ${JSON.stringify(st)}`);
+    await ctrl('Home'); await settle();
+  }
+
   step('the overhead page (0): it opens, its switches work; a checkpoint keeps the switches');
   await key('0');
   if (!await evaluate(() => FG.panels.isOpen('overhead'))) errors.push('0 did not open the overhead page');

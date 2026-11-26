@@ -551,6 +551,13 @@
     if (e.metaKey || e.altKey) return;
     const down = e.type === 'keydown';
     const k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+    // Ctrl + arrows, Home, End: the cockpit's views (src/cockpit3d.js move), in the 3D flight decks
+    const VIEW_KEYS = { ArrowUp: [-1, 0], ArrowDown: [1, 0], ArrowLeft: [0, -1], ArrowRight: [0, 1], Home: ['home'], End: ['rear'] };
+    if (e.ctrlKey && VIEW_KEYS[k] && s.cam === 'cockpit' && pit3d() && FG.cockpit3d && FG.cockpit3d.move) {
+      e.preventDefault(); e.stopImmediatePropagation();
+      if (e.type === 'keydown') FG.cockpit3d.move(...VIEW_KEYS[k]);
+      return;
+    }
     // Ctrl is the browser's, except for the thrust keys (Ctrl = fast thrust, see below)
     if (e.ctrlKey && k !== 'Control' && !THRUST_KEYS.includes(k)) return;
     // the sound key, the F keys (bug report, dev tools) and Tab stay the browser's and the game's
@@ -1790,6 +1797,7 @@
     ['U   J', 'autopilot on / off (any stick input also disconnects it) · APPR (ILS approach)'],
     ['O   Y', 'FCU panel (autopilot, on the glareshield) · MCDU (flight plan)'],
     ['I   drag', () => (pit3d() ? 'cockpit: big PFD and engine display on / off · drag to look round (double click: ahead)' : '(the Airbus 3D cockpits only)')],
+    ['Ctrl + ← → ↑ ↓', () => (pit3d() ? 'cockpit views: windows, captain, middle, first officer · up: overhead · down: screens, pedestal (Ctrl+Home: ahead, Ctrl+End: behind the seats)' : '(the Airbus 3D cockpits only)')],
     ['0', 'overhead panel: lights, signs, APU, engine masters, fire and the extinguishers, failures'],
     ['Z   Backspace', 'save a checkpoint · back to it (try again until it works)'],
     ['L', () => (!s.spec.prot ? 'limiter: this one has no protections at all' : s.limiter ? 'limiter off: no protections (it can stall and be overstressed)' : 'limiter back on')],

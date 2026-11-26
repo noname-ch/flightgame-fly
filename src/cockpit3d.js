@@ -840,6 +840,7 @@ export function draw(renderer, gl, { sunB, day, fov, look, lookDown }) {
   useDeck(kind);
   hook();
   const now = performance.now();
+  glide(Math.min(0.1, (now - (drawnAt || now)) / 1000));
   drawnAt = now;
   // (the 3D FCU is the one to use here: the FCU window over the view goes while the deck is shown)
   const fcuEl = document.getElementById('fcu');
@@ -853,7 +854,8 @@ export function draw(renderer, gl, { sunB, day, fov, look, lookDown }) {
   const d = Math.max(0, Math.min(1, day));
   pit.hemi.intensity = 0.25 + 0.8 * d;
   pit.amb.intensity = 0.08 + 0.32 * d;
-  if (sunB && d > 0.05) { pit.sun.intensity = 1.8 * d; pit.sun.position.set(sunB[0] * 10 - pit.eyeX, sunB[1] * 10, sunB[2] * 10); pit.sun.target.position.set(-pit.eyeX, 0, 0); }
+  const ex = seat.x == null ? pit.eyeX : seat.x; // (the eye's side: the captain's, the middle, the first officer's)
+  if (sunB && d > 0.05) { pit.sun.intensity = 1.8 * d; pit.sun.position.set(sunB[0] * 10 - ex, sunB[1] * 10, sunB[2] * 10); pit.sun.target.position.set(-ex, 0, 0); }
   else pit.sun.intensity = 0;
   pit.dome.intensity = L ? { OFF: 0, DIM: 1.2, BRT: 3.2 }[L.dome] : 2.5 * (1 - d);
   pit.flood.intensity = L ? 2.2 * L.flood : 0;
@@ -862,22 +864,69 @@ export function draw(renderer, gl, { sunB, day, fov, look, lookDown }) {
   // camera: the captain's eye, looking a little down the nose, turned with the head
   const W = gl.drawingBufferWidth, H = gl.drawingBufferHeight;
   camera.fov = fov; camera.aspect = W / H; camera.updateProjectionMatrix();
-  camera.position.set(-pit.eyeX, 0, 0);
+  camera.position.set(-ex, -seat.back, seat.up);
   const yaw = (look.yaw || 0) * Math.PI / 180, pitch = (-(lookDown || 0) + (look.pitch || 0)) * Math.PI / 180;
   // (the head's own up: looking up past the vertical never turns the picture over)
   camera.up.set(-Math.sin(yaw) * Math.sin(pitch), -Math.cos(yaw) * Math.sin(pitch), Math.cos(pitch));
-  camera.lookAt(-pit.eyeX + Math.sin(yaw) * Math.cos(pitch), Math.cos(yaw) * Math.cos(pitch), Math.sin(pitch));
+  camera.lookAt(-ex + Math.sin(yaw) * Math.cos(pitch), -seat.back + Math.cos(yaw) * Math.cos(pitch), seat.up + Math.sin(pitch));
   camera.updateMatrixWorld();
   renderer.clearDepth();
   renderer.render(pit.scene, camera);
 }
 // Where the eye sits in the aircraft (the game's view3d.js cockpit camera): metres behind the nose and above the
-// wheels, scaled from the A350's by the fuselage's diameter.
+// wheels, scaled from the A350's by the fuselage's diameter; moved back and up for the view from behind the seats.
 export function eye(type) {
   const look = FG.data && FG.data.looks && FG.data.looks[type];
   const k = /^A38/i.test(type || '') ? 1.05 : look && look.dia ? look.dia / 6.1 : 1;
-  return { back: 4.6 * k, up: 7.6 * k };
+  return { back: 4.6 * k + seat.back, up: 7.6 * k + seat.up };
+}
+
+// ---------- the cockpit's views: Ctrl + arrows (src/pilot.js) ----------
+// A grid of places to look from and at, moved round with Ctrl + ← → ↑ ↓: across, the left window, the captain, the
+// middle, the first officer, the right window; up, the overhead; down, the screens, the pedestal and the consoles.
+// Ctrl + Home: the captain looking ahead; Ctrl + End: from behind the seats. Each move glides there (about 0.3 s).
+// Station: C the captain's seat, M the middle, F the first officer's, R behind the seats. Yaw and pitch (°) are the
+// head's turn (the pitch from the usual look a little down the nose).
+const VIEWS = [
+  [['C', -70, 30, 'Left window, up'], ['C', 10, 65, 'Overhead (captain)'], ['M', 0, 78, 'Overhead'], ['F', -10, 65, 'Overhead (first officer)'], ['F', 70, 30, 'Right window, up']],
+  [['C', -90, 0, 'Left window'], ['C', 0, 0, 'Captain'], ['M', 0, -6, 'Middle: FCU and E/WD'], ['F', 0, 0, 'First officer'], ['F', 90, 0, 'Right window']],
+  [['C', -60, -38, 'Left console'], ['C', 0, -20, "Captain's PFD and ND"], ['M', 0, -48, 'Pedestal'], ['F', 0, -20, "First officer's PFD and ND"], ['F', 60, -38, 'Right console']],
+];
+const BEHIND = ['R', 0, -8, 'Behind the seats'];
+const at = { r: 1, c: 1, rear: false };
+// where the eye is now (metres: its x as EYE_X counts it, + the captain's side; back and up from the captain's eye),
+// and where it is going
+const seat = { x: null, back: 0, up: 0 };
+const seatTo = { x: null, back: 0, up: 0, yaw: 0, pitch: 0, t: 0 };
+const stationX = (st) => (st === 'C' ? D.EYE_X : st === 'F' ? -D.EYE_X : 0);
+function goTo(v) {
+  const [st, yaw, pitch, name] = v;
+  seatTo.x = stationX(st); seatTo.back = st === 'R' ? 0.9 : 0; seatTo.up = st === 'R' ? 0.12 : 0;
+  seatTo.yaw = yaw; seatTo.pitch = pitch; seatTo.t = 1;
+  if (FG.pilot && FG.pilot.api) FG.pilot.api.say(`View: ${name}`, 'info', 1500);
+}
+// move round the views (dr, dc: rows down, columns right); 'home' and 'rear'
+export function move(dr, dc) {
+  if (dr === 'home') { at.r = 1; at.c = 1; at.rear = false; goTo(VIEWS[1][1]); return; }
+  if (dr === 'rear') { at.rear = !at.rear; goTo(at.rear ? BEHIND : VIEWS[at.r][at.c]); return; }
+  at.rear = false;
+  at.r = Math.max(0, Math.min(2, at.r + dr));
+  at.c = Math.max(0, Math.min(4, at.c + dc));
+  goTo(VIEWS[at.r][at.c]);
+}
+// each frame: the head and the seat glide to the view picked (a drag of the mouse still turns the head from there)
+function glide(dt) {
+  if (seat.x == null) seat.x = D.EYE_X;
+  if (seatTo.x == null) return;
+  const k = 1 - Math.exp(-dt / 0.09);
+  seat.x += (seatTo.x - seat.x) * k; seat.back += (seatTo.back - seat.back) * k; seat.up += (seatTo.up - seat.up) * k;
+  const L = FG.view3d && FG.view3d.look;
+  if (L && seatTo.t > 0) {
+    L.yaw += (seatTo.yaw - L.yaw) * k; L.pitch += (seatTo.pitch - L.pitch) * k;
+    if (Math.abs(seatTo.yaw - L.yaw) < 0.3 && Math.abs(seatTo.pitch - L.pitch) < 0.3) seatTo.t = 0;
+    if (FG.view3d.map) FG.view3d.map.triggerRepaint();
+  }
 }
 // (for debugging and test/systems.mjs: FG.cockpit3d.pit is the deck drawn last, project() a cockpit point → NDC)
 FG.cockpit3d = { get pit() { return pit; }, get drawnAt() { return drawnAt; }, clicks, has, draw, eye, project: (p) => new THREE.Vector3(...p).project(camera).toArray(),
-  hitAt(x, y) { const h = pick({ clientX: x, clientY: y }); return h ? { tip: typeof h.c.tip === 'function' ? h.c.tip() : h.c.tip || '', shown: shown() } : { tip: null, shown: shown() }; }, get EYE_X() { const k = FG.pilot && kindOf(FG.pilot.type); return (k ? DECKS[k] : DECKS.a350).EYE_X; } }; // (the game's view3d.js draws through this)
+  hitAt(x, y) { const h = pick({ clientX: x, clientY: y }); return h ? { tip: typeof h.c.tip === 'function' ? h.c.tip() : h.c.tip || '', shown: shown() } : { tip: null, shown: shown() }; }, get EYE_X() { const k = FG.pilot && kindOf(FG.pilot.type); return seat.x != null && k ? seat.x : (k ? DECKS[k] : DECKS.a350).EYE_X; }, move }; // (move: the views, Ctrl + arrows) // (the game's view3d.js draws through this)
