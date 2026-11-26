@@ -232,15 +232,19 @@ outer wings, elevators and rudder, and its fuselage into the nose, the middle an
   strikes, which fails the engine and often sets it on fire (the overhead's FIRE drill: `src/systems.js`); deeper the
   outer wing breaks off and its tank catches fire; dug in up to its middle it cartwheels. The ground drags the wing
   back (it yaws towards it and slows) and pushes it up (the bank comes off), so a light strike can be flown away.
-- **The crash,** by how hard it hits:
-  - a belly landing, a gear collapse or a slow one: the gear folds and the wreck slides on its belly and slews
-    round; it burns only if a wing (its fuel) was torn open.
-  - hit hard (over about 1,400 ft/min) or slid off fast: the fuselage breaks ahead of the wing and/or behind it. The
-    nose slides on furthest, the tail stops behind and turns across, the middle with the wings in between; a
-    fireball where it hit, then the fuel burns round the middle where it stops, black smoke rising, and it chars.
-  - flown into the ground fast or steep (over about 6,000 ft/min, or 155 kt into a hillside): it goes up in a
-    fireball as big as its fuel, rising as it burns; the charred tail, nose and wings are thrown on along its
-    track (only small bits at cruise speeds), and a fire burns there for minutes.
+- **The crash** is worked out each time from what happened: the sink rate against what the gear takes, the speed
+  along the ground (the more it was sinking, the more the belly and engines dig in), runway, grass or a hillside,
+  nose down, a wing down or dug in. That gives how hard it hit, and each part fails at its own strength with some
+  chance in it, so no two crashes end the same: the fuselage behind the wing, then ahead of it; the wing tips, the
+  outer wings (the low one first), the elevators, the rudder; at the hardest it all comes apart in a fireball and only
+  the tail and fragments are left. A gentle gear-up landing slides on whole.
+  - Every part keeps the aircraft's momentum less what the impact took (about the sink rate again), is thrown up and
+    aside and spins the harder it hit, then flies, bounces and skids to a stop on its own; off the runway the ground
+    grips twice as hard. Fast crashes leave a long trail of wreckage, slow ones a short one.
+  - The impact throws out a shower of fragments, from a few to hundreds, in the livery's colours, bare metal and soot,
+    each with its own momentum (the game's `js/view3d.js` updateDebris).
+  - The fuel goes up in a fireball as big as the fuel and the impact, rising as it burns, and goes on burning with
+    black smoke where the wreck stops; the wreck chars. After a crash the view goes to the chase camera.
 
 To practise, the Esc menu has **Failures**: a wing tip (left or right), the elevator jamming, the elevators or the
 rudder breaking off, the left wing breaking. Checkpoints (Z) keep the damage too.
