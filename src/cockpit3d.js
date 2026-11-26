@@ -5,8 +5,10 @@
 //   - 'a320' (A320, A330, A340): a narrower deck with the A320 family's six square screens (PFD, ND, the E/WD over
 //     the SD in the middle, ND, PFD), the standby instrument, the gear lever and the autobrake beside them, the two
 //     MCDUs at the front of the pedestal.
-// Both have the overhead panel, the FCU, the EFIS panels and the engine master switches working: click them in 3D
-// (src/systems.js does what the overhead and the masters switch; FG.fmgc what the FCU's knobs and buttons ask).
+// Their panels are modules laid out per deck (src/panels.js LAYOUTS: move a module, or give another deck one, there),
+// all working: click them in 3D (src/systems.js, src/aircraft.js and src/radio.js do what they switch; FG.fmgc what
+// the FCU's knobs and buttons ask). The screens go dark without power, show a failed IR's flags and dim with
+// their brightness knobs.
 // Knobs: the mouse wheel turns them, a click pushes, a right-click pulls (a click on their left or right edge
 // turns them a step). Switches: a click on their upper half moves them up, on the lower half down. Hover shows
 // what a control is. The levers, sticks, gear lever, wipers and screens move with the plane; the dome, flood and

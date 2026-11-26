@@ -17,8 +17,8 @@
 //     AVAIL, IGNITION, ...), amber cautions (ENG 1 SHUT DOWN) and red warnings with their procedures, cyan lines
 //     that go when done.
 //
-// The overhead panel itself (0, or 🔆 Overhead in the HUD bar) is a page of switches here; the A320 family's 3D
-// flight deck (src/cockpit3d.js) has the same switches on its overhead and pedestal, clicked in 3D: both call set().
+// The overhead panel itself (0, or 🔆 Overhead in the HUD bar) and the pedestal (9) are pages of src/panels.js's
+// modules, the same as the 3D flight deck's (src/cockpit3d.js), clicked in 2D or 3D: all call set().
 // Hooks in src/pilot.js: engine(i, n1, dt) in the engines' loop, warnings() into the HUD's list, lights() into
 // pose(), step(dt) each frame, key(k) for the keys pilot.js leaves free, snapshot() / restore() with the
 // checkpoints.

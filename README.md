@@ -205,8 +205,74 @@ pedestal). Drag to look round; look up and to the right for the overhead panel.
   then.
 
 **The E/WD** shows the warnings and cautions with the actions still to do in cyan, the T.O memo on the ground, the
-LDG memo under 2000 ft, and the green memos. The SD shows the ENG page when an engine is out or starting, the APU
-page while the APU runs, and the WHEEL page otherwise.
+LDG memo under 2000 ft, and the green memos.
+
+**The SD** picks its page by itself (ENG when an engine is out or starting, APU while it runs, the system a failure
+is in, DOOR before the start, CRUISE in the cruise, WHEEL otherwise). The ECAM control panel on the pedestal picks
+one by hand: ENG, BLEED, PRESS, ELEC, HYD, FUEL, APU, COND, DOOR, WHEEL, F/CTL, CRUISE, ALL (each in turn), STS
+(limitations, what's inoperative). CLR clears the cautions shown, RCL brings them back, EMER CANC silences, T.O
+CONFIG tests the take-off configuration.
+
+**The rest of the overhead** (`src/aircraft.js`):
+
+- **ELEC:** batteries, a generator per engine, APU GEN, EXT PWR (parked), BUS TIE, GALY & CAB; EMER ELEC GEN 1 LINE
+  and RAT MAN ON. No generator at all: the RAT drops (over 100 kt), only the captain's PFD and ND, the E/WD and MCDU 1
+  stay alive, the autopilot is lost, ALTN LAW. On the batteries alone about 30 minutes.
+- **HYD:** an engine pump per engine (green, blue, yellow), the blue electric pump, the PTU, the yellow electric pump.
+  Green raises the gear (it falls down by gravity without), green and yellow move the flaps (half speed on one,
+  stuck on none), yellow steers the nose wheel, the brakes go from normal to alternate to the accumulator. Two
+  systems lost: ALTN LAW.
+- **FUEL:** two pumps in each wing and in the centre (MODE SEL AUTO), X FEED. Loaded for the trip and 45 minutes.
+  Above FL150 a wing with its pumps off can't feed its engines (gravity only lower down): they flame out. The weight
+  comes off as it burns; an imbalance and a low level are cautions. A torn wing tank empties.
+- **AIR COND · CAB PRESS:** ENG BLEED, APU BLEED, PACK 1 and 2, MODE SEL (MAN with the MAN V/S switch), DITCHING.
+  No packs or no bleed air: the cabin climbs; CAB PR EXCESS CAB ALT over 9550 ft, the masks drop at 14,000 ft.
+  OXYGEN CREW SUPPLY off up there: the crew gets hypoxic (the picture darkens). MASK MAN ON drops the masks.
+- **ANTI ICE:** in cloud between +2 and −30 °C ice grows on a wing without WING ANTI ICE (drag, an earlier stall)
+  and on engines without ENG ANTI ICE (less thrust). PROBE/WINDOW HEAT; ICE IND shows ICE on the SD.
+- **ADIRS:** IR 1-3 OFF / NAV / ATT and the ADR pushbuttons. An IR off is lost: its pilot's PFD shows ATT, the ND
+  MAP NOT AVAIL. On the ground NAV aligns it again (two minutes here); in flight only ATT works. The ATT HDG and AIR
+  DATA switches on the pedestal give a pilot the third IR or ADR. Two lost: ALTN LAW, no autopilot.
+- **GPWS:** SYS, TERR (the ground along the flight path a minute ahead: TERRAIN AHEAD, PULL UP), G/S MODE (GLIDE
+  SLOPE), FLAP MODE, LDG FLAP 3.
+- **EVAC** (the horn), **CALLS** MECH and ALL, **RCDR GND CTL**, **EMER EXIT LT**, **ICE IND & STBY COMPASS**.
+
+**The pedestal** (also as a page: 9):
+
+- **RMP 1 and 2:** VHF 1, 2 or 3; the knob tunes the standby frequency (the wheel 25 kHz, Shift 1 MHz), ⇄ swaps it
+  in. On an airport's real ATIS frequency (OurAirports) the ATIS is read out with the game's weather there: runway in
+  use, wind, visibility, cloud, temperature, QNH, the letter changing each hour. On its TOWER you're cleared for
+  take-off and to land; on APPROACH or DEPARTURE you get your climb or the ILS. Spoken with the sound on (M), always
+  written at the top. Each flight starts on the tower and the ATIS.
+- **ATC / TCAS:** the squawk (click a digit, or the wheel on it; 7500, 7600, 7700), STBY / AUTO / ON, IDENT, ALT;
+  TCAS STBY / TA / TA/RA and the traffic shown (THRT, ALL, ABV, BLW). TCAS sees the game's own aircraft in the air
+  round you: TRAFFIC on the ND, "traffic, traffic", and with TA/RA a CLIMB or DESCEND.
+- **ECAM control panel, the ATT HDG and AIR DATA switching, the displays' brightness** (UPPER and LOWER DISPLAY), the
+  ENG masters and MODE, the MCDUs (the A350's keyboards open them too), PARK BRK.
+
+**The main panel:** each pilot's PFD and ND brightness and TERR ON ND (the terrain on the ND: red over 2000 ft above,
+amber up to 500 ft below, green to 2000 ft below), the CLOCK with UTC and its CHR chronometer, the A/SKID & N/W STRG
+switch (off: no nose wheel steering and no anti-skid; braking hard at speed bursts the tyres), AUTO BRK.
+
+**The EFIS panels:** FD and LS; one of CSTR (the flight plan's altitudes), WPT (the towns the MCDU knows), VOR.D,
+NDB (the beacons) or ARPT on the ND; the ADF / VOR needles 1 and 2 (VORs tuned by themselves, or on RAD NAV);
+MODE and RANGE.
+
+**The MCDU** also has DATA (position and IRS monitors, A/C status, look up a waypoint or navaid), FUEL PRED (fuel at
+the destination, extra), SEC F-PLN (copy, activate, delete), ATC COMM (an airport's ATIS by datalink), MCDU MENU
+(AIDS engine report, CFDS fault list), PERF to fill in (V1, VR and V2 with their callouts, FLEX temperature for less
+take-off thrust, QNH, BARO and RADIO minimums with "minimum", LDG CONF 3) and RAD NAV (VOR and ADF by ident).
+
+### Modules: putting panels into other aircraft
+
+Every panel is a module in `src/panels.js` (`MODULES`): its picture and its controls, drawn from its own corner. A
+deck's `LAYOUTS` say where its modules sit on each surface:
+
+    LAYOUTS.a320.pedestal = [['mcdu', 10, 22, { i: 0 }], ['rmp', 8, 410, { i: 0 }], ['xpdr', 14, 880], ...]
+
+To give a deck another module add a line; to move it change its x and y (pixels of that surface: the glareshield
+2560 × 128, the main panel 1024 × 256, the pedestal 512 × 1024 with the front at the top, the overhead 1024 × 1004
+with aft at the top). `deckOf(type)` says which deck a type flies with. A module works wherever it is put.
 
 ## Damage and crashes
 
@@ -266,7 +332,11 @@ rudder breaking off, the left wing breaking. Checkpoints (Z) keep the damage too
 | `src/pilot.js` | The flying: physics (with the wind), PFD, ECAM, the A350's screens, checkpoints. It came from the game's old `js/pilot.js` and now lives only here. |
 | `src/select.js` | The start screen (`FG.flySelect`): gallery, airport search and map, start, livery, time, wind. |
 | `src/cockpit3d.js` | The 3D flight decks, A350 and A320 family (`FG.cockpit3d`, drawn by the game's view3d.js in the cockpit camera); its panels are clicked in 3D. |
-| `src/systems.js` | Lights, signs, APU, engine masters, fire and extinguishers, the E/WD's memo, the overhead page (`FG.systems`). |
+| `src/systems.js` | Lights, signs, APU, engine masters, fire and extinguishers, the E/WD's memo (`FG.systems`); other systems plug in. |
+| `src/aircraft.js` | Electrics, hydraulics, fuel, air and pressure, ice, ADIRS, GPWS, the small panels, the SD's pages. |
+| `src/radio.js` | Radios (RMP), ATIS and ATC calls, VOR/ADF receivers, transponder and TCAS (`FG.radio`). |
+| `src/panels.js` | The panels as modules and the decks' layouts (`FG.panels`); the 2D pages 0 and 9. |
+| `src/data/navdata.js` | VORs, DMEs, NDBs and airport frequencies from OurAirports (public domain): `tools/build_navdata.py`. |
 | `src/fmgc.js` | Autopilot, flight directors, autothrust modes, flight plan, autoland, autobrake; draws the FMA, FD bars and ND. |
 | `src/fcu.js` | The glareshield panel. |
 | `src/mcdu.js` | The MCDU. |
