@@ -18,6 +18,10 @@ airline's save is read here (liveries, the plane you take over) but never writte
 The page takes `?type=A320&from=ZRH&rw=16&to=GVA&crz=200&mode=runway|final|takeover&plane=<id>&back=<url>&go=1`
 (`go=1` skips the start dialog).
 
+Before a push: `node test/smoke.mjs` (headless Chrome: the page loads, an A350 flies, every type starts) and
+`python test/run.py` (a whole A320 flight on the autopilot). After updating the submodule
+(`git submodule update --remote flightgame`), run `python tools/build_index.py`.
+
 To send the game's ✈ Fly button to a local copy, run this once in the game's page console:
 `localStorage.setItem('flightgame.flyUrl', 'http://localhost:8000/')` (`'here'` keeps the old in-game dialog).
 
