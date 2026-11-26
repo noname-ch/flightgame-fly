@@ -214,7 +214,7 @@
   }
   useType(TYPES.A320);
   // cockpit camera: looks this far below the nose (°); more in a 3D flight deck (js/cockpit3d.js), so the screens show
-  const pit3d = () => /^A350/i.test(s.type || '');
+  const pit3d = () => !!(FG.cockpit3d && FG.cockpit3d.has(s.type));
   const lookDownOf = () => (pit3d() ? 10 : 4);
   // airbus(): Airbus normal law with its protections. With the limiter off (L) an Airbus flies in direct law: as
   // the conventional types, it can stall, overbank and pull as hard as the stick asks.
@@ -483,7 +483,7 @@
     if (s.loading || s.crashed) { say('No checkpoint while crashed', 'amber', 2000); return; }
     const st = {};
     for (const k of CK) st[k] = s[k];
-    s.ck = { fm: FG.fmgc ? FG.fmgc.snapshot() : null, state: structuredClone(st), at: performance.now(), where: s.onGround ? 'on the ground' : `${Math.round(s.h / FT / 10) * 10} ft, ${Math.round(ias())} kt` };
+    s.ck = { fm: FG.fmgc ? FG.fmgc.snapshot() : null, sys: FG.systems ? FG.systems.snapshot() : null, state: structuredClone(st), at: performance.now(), where: s.onGround ? 'on the ground' : `${Math.round(s.h / FT / 10) * 10} ft, ${Math.round(ias())} kt` };
     say(`⚑ Checkpoint saved (${s.ck.where}) · Backspace: back here`, 'info', 3000);
   }
   function toCheckpoint() {
@@ -491,6 +491,7 @@
     if (!s.ck) { restart(); say('No checkpoint yet (Z saves one): started again', 'amber', 3000); return; }
     Object.assign(s, structuredClone(s.ck.state));
     if (FG.fmgc && s.ck.fm) FG.fmgc.restore(s.ck.fm);
+    if (FG.systems && s.ck.sys) FG.systems.restore(s.ck.sys);
     Object.assign(s, { crashed: null, touch: null, stick: 0, roll: 0, rud: 0, paused: true, help: false });
     s.keys.clear(); s.msgs = []; lastV = null; s.trend = null;
     s.limiterPref = s.limiter; limiterButton();
@@ -580,7 +581,7 @@
       case 'j': if (FG.fmgc) FG.fmgc.press('APPR'); break;
       case 'o': if (FG.fmgc) FG.fmgc.fcuToggle(); break;
       case 'y': if (FG.fmgc) FG.fmgc.mcduToggle(); break;
-      default:
+      default: if (FG.systems) FG.systems.key(k, e); // (0: the overhead panel, src/systems.js)
     }
   }
   // The limiter (L, or the 🛡 button): the protections and limits on or off. Off, an Airbus is in direct law (no
@@ -678,6 +679,9 @@
     let fr = 0;
     for (let i = 0; i < s.n1.length; i++) {
       const n = s.n1[i];
+      // (src/systems.js: an engine shut down, failed or starting gives no thrust and its N1 is the systems')
+      const sysN1 = FG.systems ? FG.systems.engine(i, n, dt) : null;
+      if (sysN1 != null) { s.n1[i] = sysN1; continue; }
       const diff = target - n;
       if (props) s.n1[i] = clamp(n + clamp(diff * 2.5, -35, 30) * dt, IDLE_N1 - 1, 101);
       else {
@@ -1281,6 +1285,7 @@
       for (const h of Object.keys(s.calls)) if (a > Number(h) + 150) delete s.calls[h];
     }
     s.prevAgl = s.onGround ? 0 : a;
+    if (FG.systems) w.unshift(...FG.systems.warnings()); // (fires and engines: src/systems.js)
     return w;
   }
 
@@ -1312,6 +1317,7 @@
       let left = Math.min(dtAll, 0.25);
       while (left > 1e-6) { const dt = Math.min(0.02, left); if (FG.fmgc) FG.fmgc.control(dt); physics(dt); left -= dt; if (s.crashed) break; }
     }
+    if (FG.systems) FG.systems.step(dtAll);
     draw(s.crashed ? [] : warnings());
   }
 
@@ -1337,7 +1343,8 @@
       gone: s.gone, // (destroyed on impact: nothing left to draw)
       st: { phase, speedKmh: kmh, altFt: s.h / FT, fieldFt: s.groundH / FT, ground: s.onGround, windKt: s.wind ? s.wind.kt : 0, windFrom: s.wind ? s.wind.from : 0, gusty: !!(s.wind && s.wind.gusty), airFrac: 0 },
       pilot: { gear: s.gear, flap: confAt(s.flapPos).flap, ail: s.roll, elev: s.onGround ? s.stick : s.stick * 0.7, rud: s.onGround ? s.rud : s.rud, rev: s.rev, n1: s.n1.reduce((x, y) => x + y, 0) / s.n1.length, gamma: s.gamma / DEG, vs,
-        nz: (s.load || 0) + bf * 0.25 * Math.sin(tb * 13), stall: s.stallAmt || 0 },
+        nz: (s.load || 0) + bf * 0.25 * Math.sin(tb * 13), stall: s.stallAmt || 0,
+        lights: FG.systems ? FG.systems.lights() : null }, // (the overhead's switches: src/systems.js)
     };
   }
 
@@ -1388,7 +1395,8 @@
     ['C  V  N', 'camera: next · chase · wing'],
     ['U   J', 'autopilot on / off (any stick input also disconnects it) · APPR (ILS approach)'],
     ['O   Y', 'FCU panel (autopilot, on the glareshield) · MCDU (flight plan)'],
-    ['I   drag', () => (pit3d() ? 'cockpit: big PFD and engine display on / off · drag to look round (double click: ahead)' : '(the A350s\' 3D cockpit only)')],
+    ['I   drag', () => (pit3d() ? 'cockpit: big PFD and engine display on / off · drag to look round (double click: ahead)' : '(the Airbus 3D cockpits only)')],
+    ['0', 'overhead panel: lights, signs, APU, engine masters, fire and the extinguishers, failures'],
     ['Z   Backspace', 'save a checkpoint · back to it (try again until it works)'],
     ['L', () => (!s.spec.prot ? 'limiter: this one has no protections at all' : s.limiter ? 'limiter off: no protections (it can stall and be overstressed)' : 'limiter back on')],
     ['P   Esc', 'pause · menu (resume, checkpoint, start again, leave)'],
