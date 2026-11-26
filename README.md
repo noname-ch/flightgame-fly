@@ -349,19 +349,28 @@ rudder breaking off, the left wing breaking. Checkpoints (Z) keep the damage too
 
 With the game's sound on (M), the flight deck sounds as each aircraft's does (`src/cocksnd.js`):
 
-- **The warning voice:** PULL UP, TERRAIN AHEAD, SINK RATE, TOO LOW GEAR / FLAPS, GLIDE SLOPE, BANK ANGLE, the radio
-  height callouts, V1 / rotate, minimum, retard. Each family has its own recorded voice and words: the Airbuses
-  ("twenty five hundred", "retard", "stall, stall"), the Boeings ("two thousand five hundred", "minimums"; a whoop
-  whoop before PULL UP), the turboprops and the Global 7500, Concorde (an older, narrower speaker). The DC-3 and the
-  Ju 52 have no warning computer: no voice. The recordings are in `sounds/voice/<family>/` (`tools/build_voices.py`).
-- **The warning tones:** Airbus: the continuous repetitive chime, the stall cricket, the cavalry charge. Boeing,
-  turboprops, Concorde: the fire bell, the overspeed clacker, the stick shaker, the autopilot wailer, the take-off
-  config horn, the master warning beeper (Concorde a gong).
-- **The aircraft:** the air rushing past (muffled in the cockpit, louder outside), the engines (a thrum on the
-  propellers), the flap and gear motors with their clunks, the lever's detent, gear, flaps and speed brakes rumbling
-  in the airflow, buffet, the runway under the wheels, touchdowns as hard as they were. Metal creaks when it's
-  overstressed; a wing tip, a wing, the elevators or the rudder tear off with a crack, a bang and tearing metal; a wing
-  scraping the ground grinds; the impact crunches, the fuel goes up with a whoomp and the fire roars and crackles.
+- **The GPWS** (as Honeywell's EGPWS): mode 1 sinking too fast for the height (SINK RATE, then PULL UP), mode 2 the
+  ground coming up too fast (TERRAIN TERRAIN, then PULL UP), mode 3 height lost after take-off (DON'T SINK), mode 4 too
+  low not set up to land (TOO LOW GEAR / FLAPS, TOO LOW TERRAIN when fast), mode 5 GLIDE SLOPE, mode 6 BANK ANGLE past
+  35°, the terrain ahead (TERRAIN AHEAD, PULL UP). PULL UP, TERRAIN, BANK ANGLE, SINK RATE, TOO LOW GEAR / FLAPS /
+  TERRAIN and STALL are **real recordings** of warning computers (a Twin Otter's from its intercom, and others); a
+  Boeing, a turboprop and Concorde whoop twice before PULL UP. The DC-3 and the Ju 52 have no warning computer.
+- **Each family's own callouts:** the radio heights, V1 / rotate, minimum(s), retard, in its own voice and words
+  (Airbus "twenty five hundred", "retard, retard"; Boeing "two thousand five hundred", "minimums"; the turboprops and
+  the Global; Concorde through an older speaker): `sounds/voice/<family>/` from `tools/build_voices.py`.
+- **The warning tones:** Airbus: the continuous repetitive chime, the stall cricket, the cavalry charge, its real cabin
+  chime. Boeing, turboprops, Concorde: the fire bell, the overspeed clacker, the stick shaker, the autopilot wailer,
+  the take-off config horn, the master warning beeper (Concorde a gong).
+- **Inside the aircraft, recorded in real ones:** idle, take-off power and cruise in an A320, an A330, an A350, a 737,
+  a 747, a 777 and a Dash 8's cockpit (the ATR too), radial engines for the DC-3 and the Ju 52, mixed by the engines'
+  power and the speed; the A350's flaps running and gear coming down, a small aircraft's flaps and gear, a 737's
+  touchdown, the APU on the ground.
+- **Damage:** real metal creaking when overstressed, girders and aluminium tearing as a wing, a tip, the elevators or
+  the rudder come off, metal scraping along the ground, the fire burning; the impact and the fireball (made up for now).
+- Made up as it plays: the air rushing past outside, the flaps' and gear's air, buffet, the runway under the wheels.
+
+The real recordings are CC0 or CC BY from Freesound and Wikimedia Commons, cut by `tools/build_real_sounds.py` into
+`sounds/real/` where nobody talks; `sounds/real/CREDITS.md` names every one.
 
 ## Files
 
@@ -369,7 +378,7 @@ With the game's sound on (M), the flight deck sounds as each aircraft's does (`s
 |---|---|
 | `index.html` | Generated from `flightgame/index.html` by `tools/build_index.py`: run it after every submodule update. |
 | `src/pilot.js` | The flying: physics (with the wind), PFD, ECAM, the A350's screens, checkpoints. It came from the game's old `js/pilot.js` and now lives only here. |
-| `src/cocksnd.js` | The flight deck's sounds (`FG.cocksnd`): each family's warning voice and tones, the airflow, motors, breaking parts, crashes. |
+| `src/cocksnd.js` | The flight deck's sounds (`FG.cocksnd`): the GPWS and each family's callouts and tones, the recorded insides, motors, breaking parts, crashes. |
 | `src/select.js` | The start screen (`FG.flySelect`): gallery, airport search and map, start, livery, time, wind. |
 | `src/cockpit3d.js` | The 3D flight decks, A350 and A320 family (`FG.cockpit3d`, drawn by the game's view3d.js in the cockpit camera); its panels are clicked in 3D. |
 | `src/systems.js` | Lights, signs, APU, engine masters, fire and extinguishers, the E/WD's memo (`FG.systems`); other systems plug in. |

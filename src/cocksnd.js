@@ -20,6 +20,35 @@
   const VOICE = new URL('../sounds/voice/', document.baseURI).href; // (the page's base is the game's folder)
   const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
   const KT = 0.514444;
+  const REAL = new URL('../sounds/real/', document.baseURI).href; // (real recordings: tools/build_real_sounds.py)
+
+  // ---------- the real recordings ----------
+  // The GPWS words recorded from real warning computers (the same Honeywell voice on the Airbuses, Boeings, ATR and
+  // Dash 8); the other words are each family's own (sounds/voice).
+  const REAL_GPWS = new Set(['pullup', 'bankAngle', 'terrain', 'sinkrate', 'lowGear', 'lowFlaps', 'lowTerrain', 'stall']);
+  // The inside of each aircraft: loops at idle, at take-off power and cruising (recorded in real ones), by type.
+  const BEDS = {
+    a320: { idle: 'a320', power: 'a320', cruise: 'a320' }, a330: { idle: 'a320', power: 'a320', cruise: 'a330' },
+    a350: { idle: 'a320', power: 'a320', cruise: 'a350' }, b737: { idle: 'b737', power: 'b737', cruise: 'b737' },
+    b747: { idle: 'b737', power: 'b747', cruise: 'b747' }, b777: { idle: 'b737', power: 'b747', cruise: 'b777' },
+    dash8: { idle: 'dash8', power: 'dash8', cruise: 'dash8' }, radial: { idle: 'radial', power: 'radial', cruise: 'radial:power' },
+  };
+  function bedOf(type, sp) {
+    if (/^A35/.test(type)) return 'a350';
+    if (/^A3[348]/.test(type)) return 'a330';
+    if (/^A3/.test(type)) return 'a320';
+    if (/^B737/.test(type)) return 'b737';
+    if (/^B747/.test(type) || sp.engine === 'sst') return 'b747';
+    if (/^B777/.test(type)) return 'b777';
+    if (sp.engine === 'prop') return 'dash8';
+    if (sp.engine === 'piston') return 'radial';
+    return 'a320';
+  }
+  // the moving parts that have their real sound on this type: the flaps running (a loop), the gear coming down
+  function partsOf(type, sp) {
+    const small = sp.engine === 'prop' || sp.engine === 'piston';
+    return { flaps: /^A35/.test(type) ? 'a350-flaps' : small ? 'flaps-small' : null, gear: /^A35/.test(type) ? 'a350-gear' : small ? 'gear-small' : null };
+  }
 
   // ---------- each family's sounds ----------
   // voice: the folder of its recordings (null: no warning computer); whoop: the GPWS sweeps before "pull up";
@@ -53,7 +82,7 @@
   // what each family has recorded (tools/build_voices.py)
   const ALL = ['pullup', 'terrain', 'terrainAhead', 'terrainAheadPullup', 'cautionTerrain', 'sinkrate', 'lowGear', 'lowFlaps', 'lowTerrain', 'glideslope',
     'bankAngle', 'v1', 'rotate', 'a2500', 'a1000', 'a0500', 'a0100', 'a0050', 'a0040', 'a0030', 'a0020', 'a0010', 'hundredAbove', 'evacuate', 'tailStrike',
-    'config', 'topOfDescent', 'youHaveControl', 'windshear', 'overspeed', 'minimum', 'retard', 'stall'];
+    'config', 'topOfDescent', 'youHaveControl', 'windshear', 'overspeed', 'minimum', 'retard', 'stall', 'dontSink'];
   const HAS = {
     airbus: new Set([...ALL, 'thrustLeversClimb', 'speed', 'dualInput']),
     boeing: new Set([...ALL, 'dontSink', 'approachingMinimums']),
@@ -65,12 +94,16 @@
   // before they're said again while it lasts.
   const MODES = [
     [/^TERRAIN AHEAD — PULL UP/, 1, 'terrainAheadPullup', 0.25],
-    [/^PULL UP/, 1, 'pullup', 0.2],
+    [/^PULL UP/, 1, 'pullup', 0.15],
+    [/^TERRAIN TERRAIN/, 2, 'terrain', 0.3],
     [/^TERRAIN AHEAD/, 3, 'terrainAhead', 4],
-    [/^SINK RATE/, 3, 'sinkrate', 0.9],
-    [/^TOO LOW — GEAR/, 4, 'lowGear', 0.9],
-    [/^TOO LOW — FLAPS/, 4, 'lowFlaps', 0.9],
-    [/^GLIDE SLOPE/, 6, 'glideslope', 2.5],
+    [/^TOO LOW — TERRAIN/, 4, 'lowTerrain', 0.8],
+    [/^TOO LOW — GEAR/, 4, 'lowGear', 0.8],
+    [/^TOO LOW — FLAPS/, 4, 'lowFlaps', 0.8],
+    [/^SINK RATE/, 5, 'sinkrate', 0.8],
+    [/^DON'T SINK/, 5, 'dontSink', 0.8],
+    [/^GLIDE SLOPE/, 6, 'glideslope', 2],
+    [/^BANK ANGLE/, 7, 'bankAngle', 1.2],
   ];
 
   // ---------- audio ----------
@@ -93,6 +126,7 @@
     // the aircraft's own sounds (muffled through the cockpit's walls) and the flight deck's loudspeaker
     fxTone = ac.createBiquadFilter(); fxTone.type = 'lowpass'; fxTone.frequency.value = 12000; fxTone.Q.value = 0.5;
     fxBus = ac.createGain(); fxBus.connect(fxTone).connect(out);
+    bedBus = ac.createGain(); bedBus.connect(out); // (the recorded inside: already as heard in there)
     const hp = ac.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 250;
     const lp = ac.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 6000;
     spk = ac.createGain(); spk.gain.value = 0.9; spk.connect(hp).connect(lp).connect(out);
@@ -159,6 +193,51 @@
     src().connect(filt('bandpass', 420, 1.5)).connect(L.shaker.am).connect(L.shaker.g).connect(fxBus);
   }
   const T = (param, v, tau = 0.08) => param.setTargetAtTime(Number.isFinite(v) ? v : 0, ac.currentTime, tau);
+  // a recording: the AudioBuffer once it's in (null until then, or if it failed)
+  function rec(url) {
+    const b = bufs.get(url);
+    if (b instanceof AudioBuffer) return b;
+    if (!bufs.has(url)) {
+      bufs.set(url, fetch(url).then((r) => (r.ok ? r.arrayBuffer() : Promise.reject(r.status))).then((x) => ac.decodeAudioData(x))
+        .then((x) => { bufs.set(url, x); return x; }, () => { bufs.set(url, null); return null; }));
+    }
+    return null;
+  }
+  // R: the real loops playing ({ g, src, url }), by name; set once a flight starts (realSet)
+  const R = {};
+  function realLoop(name, url, to = fxBus) {
+    if (R[name] && R[name].url === url) return;
+    if (R[name]) { try { R[name].src.stop(); } catch (e) { /* */ } R[name].g.disconnect(); }
+    const r = R[name] = { url, g: gain(0), src: null };
+    r.g.connect(to);
+    const go = (b) => { if (!b || R[name] !== r) return; const s0 = ac.createBufferSource(); s0.buffer = b; s0.loop = true; s0.connect(r.g); s0.start(0, Math.random() * b.duration); r.src = s0; };
+    const b = rec(url);
+    if (b) go(b); else Promise.resolve(bufs.get(url)).then(go);
+  }
+  const has = (name) => !!(R[name] && R[name].src);
+  function realSet(type, sp) {
+    const bed = BEDS[bedOf(type, sp)];
+    for (const part of ['idle', 'power', 'cruise']) {
+      const [set, as] = bed[part].split(':');
+      realLoop('bed-' + part, `${REAL}bed/${set}-${as || part}.wav`, bedBus);
+    }
+    const pt = partsOf(type, sp);
+    if (pt.flaps) realLoop('flaps', `${REAL}fx/${pt.flaps}.wav`); else if (R.flaps) { T(R.flaps.g.gain, 0); }
+    for (const [n, f] of [['apu', 'apu'], ['scrape', 'scrape'], ['fire', 'fire']]) realLoop(n, `${REAL}fx/${f}.wav`);
+    parts = pt;
+    for (const f of ['touchdown.mp3', 'chime.mp3', 'creak-1.mp3', 'creak-2.mp3', 'creak-3.mp3', 'tear-1.mp3', 'tear-2.mp3', 'tear-3.mp3']) rec(REAL + 'fx/' + f);
+    if (pt.gear) rec(`${REAL}fx/${pt.gear}.mp3`);
+  }
+  let parts = {}, bedBus = null;
+  // a real one-shot: false if it isn't in (yet)
+  function shot(file, v = 1, to = fxBus, rate = 1) {
+    const b = rec(REAL + 'fx/' + file);
+    if (!b) return false;
+    const s0 = ac.createBufferSource(), g = gain(v);
+    s0.buffer = b; s0.playbackRate.value = rate; s0.connect(g).connect(to); s0.start();
+    note('rec ' + file);
+    return true;
+  }
 
   // ---------- one-shot sounds ----------
   // a burst of noise through a filter, with an envelope
@@ -186,6 +265,13 @@
   const fx = {
     // a heavy part going: a crack, a deep bang and the long tearing of metal (size 0.3 … 1.5)
     tear(size = 1, at = 0) {
+      // (the real tearing of metal, girders for a wing, aluminium for the smaller parts; made up until it's in)
+      if (shot(size > 1 ? (Math.random() < 0.5 ? 'tear-1.mp3' : 'tear-2.mp3') : 'tear-3.mp3', 1.4 * Math.min(1.2, size + 0.3), fxBus, size > 1 ? 0.8 : 1)) {
+        burst({ type: 'lowpass', f: 900, f1: 60, d: 0.5 + 0.4 * size, v: 0.9 * size, at: at + 0.01 });
+        osc({ type: 'sine', f: 70, f1: 30, d: 0.6 + 0.3 * size, v: 0.6 * size, at, to: fxBus });
+        note('tear');
+        return;
+      }
       burst({ type: 'highpass', f: 1500, d: 0.04, v: 0.7 * size, at }); // (the crack)
       burst({ type: 'lowpass', f: 900, f1: 60, d: 0.5 + 0.4 * size, v: 0.9 * size, at: at + 0.01 }); // (the bang)
       osc({ type: 'sine', f: 70, f1: 30, d: 0.6 + 0.3 * size, v: 0.6 * size, at, to: fxBus });
@@ -200,6 +286,7 @@
     },
     // metal groaning under load (more and deeper the more it's overstressed)
     creak(k = 1) {
+      if (Math.random() < 0.8 && shot(`creak-${1 + Math.floor(Math.random() * 3)}.mp3`, 0.9 * k, fxBus, 0.7 + 0.5 * Math.random())) { note('creak'); return; }
       const f = 120 + Math.random() * 260;
       burst({ type: 'bandpass', f, f1: f * (0.7 + Math.random() * 0.6), q: 12, a: 0.08, d: 0.3 + Math.random() * 0.5, v: 0.6 * k, rate: 0.6 });
       if (Math.random() < 0.4) burst({ type: 'bandpass', f: 1800 + Math.random() * 1500, q: 10, a: 0.002, d: 0.05, v: 0.25 * k, at: 0.2 * Math.random() }); // (a tick)
@@ -214,6 +301,7 @@
     // the wheels meeting the runway: a thump as hard as the landing and the tyres' chirp
     thump(fpm) {
       const k = clamp(fpm / 600, 0.15, 1.6);
+      shot('touchdown.mp3', 0.5 + 0.6 * k, bedBus); // (a real 737's touchdown, from inside)
       osc({ type: 'sine', f: 80, f1: 35, d: 0.25 + 0.2 * k, v: 0.5 * k, to: fxBus });
       burst({ type: 'lowpass', f: 600, d: 0.25, v: 0.5 * k });
       burst({ type: 'bandpass', f: 2400, q: 3, d: 0.18, v: 0.25, at: 0.01 }); // (the chirp)
@@ -263,7 +351,7 @@
   function load(fam, key) {
     const id = `${fam}/${key}`;
     if (bufs.has(id)) return bufs.get(id);
-    const p = fetch(VOICE + id + '.mp3').then((r) => (r.ok ? r.arrayBuffer() : Promise.reject(r.status)))
+    const p = fetch(fam === 'real' ? `${REAL}gpws/${key}.mp3` : VOICE + id + '.mp3').then((r) => (r.ok ? r.arrayBuffer() : Promise.reject(r.status)))
       .then((b) => ac.decodeAudioData(b)).then((b) => { bufs.set(id, b); return b; }, () => { bufs.set(id, null); return null; });
     bufs.set(id, p);
     return p;
@@ -272,12 +360,14 @@
     const f = FAM[fam], v = f && (f.voice || f.crew);
     if (!v || !ac) return;
     for (const k of HAS[v]) load(v, k);
+    if (f.voice) for (const k of REAL_GPWS) load('real', k);
   }
   let cur = null; // { key, prio, src, ends }
   const lastEnd = {};
   let pending = []; // [{ key, prio, at }]: one-shot words waiting for the voice
   function voiceOf(key) {
     const f = FAM[fam];
+    if (f.voice && REAL_GPWS.has(key) && bufs.get(`real/${key}`) !== null) return 'real'; // (null: it failed to load)
     if (f.voice && HAS[f.voice].has(key)) return f.voice;
     if (CREW.has(key) && f.crew) return f.crew;
     return null;
@@ -310,7 +400,7 @@
     if (!voiceOf(key)) return !!FAM[fam] && !CREW.has(key); // (no GPWS on a DC-3: silence, not the browser's voice)
     if (performance.now() - (said[key] || 0) < 1500) return true; // (two parts calling the same: once)
     said[key] = performance.now();
-    pending.push({ key, prio: /^a\d/.test(key) || key === 'minimum' || key === 'hundredAbove' || key === 'retard' ? 5 : 4, at: performance.now() });
+    pending.push({ key, prio: /^a\d/.test(key) || key === 'minimum' || key === 'hundredAbove' || key === 'retard' ? 6.5 : 4, at: performance.now() });
     return true;
   }
   const said = {};
@@ -327,7 +417,7 @@
     if (!s || !s.active || s.loading || !FG.sound || !FG.sound.on) { if (ac) { T(out.gain, 0, 0.1); silence(); } prev = null; return; }
     if (!ready()) return;
     if (ac.state === 'suspended') ac.resume().catch(() => {});
-    if (s.startAt !== startAt) { startAt = s.startAt; fam = familyOf(s.spec); preload(fam); prev = null; silence(); stallT = ovsT = cfgT = mwT = creakT = bankT = 0; mwSeen = ''; }
+    if (s.startAt !== startAt) { startAt = s.startAt; fam = familyOf(s.spec); preload(fam); prev = null; silence(); realSet(s.type, s.spec); stallT = ovsT = cfgT = mwT = creakT = bankT = 0; mwSeen = ''; }
     const idle = s.paused || s.menu;
     T(out.gain, idle ? 0 : 0.9 * (FG.sound.volume ?? 0.6), 0.1);
     if (idle) { silence(); return; }
@@ -339,14 +429,27 @@
     const q = (kt / 250) ** 2; // (the dynamic pressure, about 1 at 250 kt)
     const air = !s.onGround && !s.crashed;
 
-    // the air rushing past
-    T(L.wind.f.frequency, inside ? 250 + kt * 2.2 : 500 + kt * 9);
-    T(L.wind.g.gain, clamp(0.35 * q, 0, 0.9) * (inside ? 0.8 : 1));
-    // the engines
     const n1 = s.crashed ? 0 : (s.n1 || []).reduce((a, b) => a + b, 0) / Math.max(1, (s.n1 || []).length);
     const k1 = clamp(n1 / 100, 0, 1.1), prop = sp.engine === 'prop' || sp.engine === 'piston';
+    // the inside as recorded in the real aircraft: idle, take-off power and cruise loops, mixed by the engines'
+    // power and the speed (outside, in the chase camera, quieter: there the made-up air and engines lead)
+    const sm = (a, b, x) => clamp((x - a) / (b - a), 0, 1);
+    const bedOn = has('bed-idle') || has('bed-power') || has('bed-cruise');
+    const engRun = s.crashed ? 0 : sm(5, 18, n1);
+    const wPow = sm(0.55, 0.9, k1) * (1 - sm(190, 280, kt));
+    const wCru = sm(120, 240, kt) * (1 - 0.7 * wPow) * engRun;
+    const wIdle = (1 - sm(0.45, 0.75, k1)) * (1 - wCru) * engRun;
+    const bedK = (inside ? 1 : 0.35) * (s.crashed ? 0 : 1);
+    if (R['bed-idle']) T(R['bed-idle'].g.gain, 0.55 * wIdle * bedK, 0.4);
+    if (R['bed-power']) T(R['bed-power'].g.gain, (0.25 + 0.75 * k1) * wPow * bedK, 0.4);
+    if (R['bed-cruise']) T(R['bed-cruise'].g.gain, (0.5 + 0.3 * clamp(q, 0, 1.5)) * wCru * bedK, 0.6);
+    const synth = bedOn && inside ? 0.3 : 1; // (the recordings carry the engines and the air inside)
+    // the air rushing past
+    T(L.wind.f.frequency, inside ? 250 + kt * 2.2 : 500 + kt * 9);
+    T(L.wind.g.gain, clamp(0.35 * q, 0, 0.9) * (inside ? 0.8 : 1) * synth);
+    // the engines
     T(L.eng.f.frequency, prop ? 220 + 200 * k1 : 70 + 260 * k1 ** 1.5);
-    T(L.eng.g.gain, (prop ? 0.5 : 0.35) * k1 ** 1.4 * (inside ? 0.7 : 1));
+    T(L.eng.g.gain, (prop ? 0.5 : 0.35) * k1 ** 1.4 * (inside ? 0.7 : 1) * synth);
     T(L.eng.lfo.frequency, prop ? (sp.engine === 'piston' ? 14 + 40 * k1 : 55 + 25 * k1) : 1);
     T(L.eng.depth.gain, prop ? 0.7 : 0);
     T(L.eng.hi.f.frequency, 900 + 1400 * k1);
@@ -365,7 +468,12 @@
     // the motors: the flaps moving to the lever's detent, the gear in transit
     const M = F.motor;
     const flapMoving = !s.crashed && Math.abs(s.conf - s.flapPos) > 0.002 && M.flap > 0;
-    T(L.flapM.g.gain, flapMoving ? (M.kind === 'hyd' ? 0.05 : 0.07) : 0, 0.15);
+    const realFlaps = parts.flaps && has('flaps');
+    T(L.flapM.g.gain, flapMoving && !realFlaps ? (M.kind === 'hyd' ? 0.05 : 0.07) : 0, 0.15);
+    if (R.flaps) T(R.flaps.g.gain, flapMoving && realFlaps ? (inside ? 1.1 : 0.7) : 0, 0.25);
+    // the APU running on the ground (src/systems.js)
+    const apu = FG.systems && FG.systems.S && FG.systems.S.apu;
+    if (R.apu) T(R.apu.g.gain, apu && apu.avail && !s.crashed ? (inside ? 0.12 : 0.35) * (s.onGround ? 1 : 0.5) : 0, 0.8);
     T(L.flapM.o.frequency, M.flap * (1 + 0.04 * Math.sin(now / 700)), 0.2);
     T(L.flapM.lp.frequency, M.kind === 'hyd' ? 1600 : 900);
     const gearMoving = !s.crashed && sp.gear !== 'fixed' && s.gear > 0.002 && s.gear < 0.998;
@@ -374,14 +482,17 @@
     // scraping metal: a wing on the ground, the wreck sliding
     const slide = s.crashed && s.wreck ? clamp(s.wreck.v / 40, 0, 1.2) : 0;
     const scr = Math.max(s.scrape > 0 && !s.crashed ? clamp(kt / 100, 0.3, 1.2) : 0, slide);
-    T(L.scrape.g.gain, 0.5 * scr, 0.05);
+    const realScr = has('scrape');
+    T(L.scrape.g.gain, (realScr ? 0.2 : 0.5) * scr, 0.05);
+    if (R.scrape) T(R.scrape.g.gain, 1.2 * scr, 0.05);
     L.scrape.am.gain.setTargetAtTime(0.4 + Math.random(), ac.currentTime, 0.02);
     // fire: a burning wing, a burning wreck
     const pose = P.pose ? P.pose() : null;
     const fw = pose && pose.fire ? Math.max(...(pose.fire.wing || [0]), pose.fire.slide || 0) : 0;
     const burning = s.burnAt && now - s.burnAt < 240000 ? clamp(1 - (now - s.burnAt) / 240000, 0.3, 1) : 0;
     const fire = Math.max(fw, burning);
-    T(L.fire.g.gain, 0.5 * fire, 0.3);
+    T(L.fire.g.gain, (has('fire') ? 0.2 : 0.5) * fire, 0.3);
+    if (R.fire) T(R.fire.g.gain, 1.3 * fire, 0.3);
     L.fire.cr.g.gain.setTargetAtTime(fire * (Math.random() < 0.3 ? 0.4 * Math.random() : 0), ac.currentTime, 0.01);
 
     // the events since the last tick
@@ -400,7 +511,10 @@
         if (s.gone || (s.impact || 0) > 0.9 || s.burnAt) fx.whoomp(s.gone ? 1.5 : 1);
       }
       if (cur0.touch && cur0.touch !== prev.touch && !s.crashed) fx.thump(Math.abs(s.touch.fpm || 200));
-      if (cur0.gearDown !== prev.gearDown && sp.gear !== 'fixed' && !s.crashed) fx.clunk(0.35, 140); // (the doors open)
+      if (cur0.gearDown !== prev.gearDown && sp.gear !== 'fixed' && !s.crashed) {
+        // (the gear coming down as recorded in a real A350 or a small aircraft; else the doors' made-up clunk)
+        if (!(cur0.gearDown && parts.gear && shot(parts.gear + '.mp3', inside ? 1.2 : 0.8))) fx.clunk(0.35, 140);
+      }
       if ((cur0.gearUp && !prev.gearUp) || (cur0.gearDn && !prev.gearDn)) if (sp.gear !== 'fixed' && !s.crashed) { fx.clunk(cur0.gearDn ? 0.8 : 0.6, cur0.gearDn ? 95 : 120); }
       if (cur0.conf !== prev.conf) fx.detent();
       if (cur0.flapAt && !prev.flapAt && M.flap) fx.clunk(0.25, 160);
@@ -417,16 +531,16 @@
 
     // the warnings, as this family sounds them
     const W = (s.warn || []).map((x) => x[0]);
-    const has = (re) => W.some((t) => re.test(t));
-    const stall = has(/^(STALL|STICK SHAKER)/);
+    const hasW = (re) => W.some((t) => re.test(t));
+    const stall = hasW(/^(STALL|STICK SHAKER)/);
     T(L.shaker.g.gain, stall && F.stall === 'shaker' ? 0.35 : 0, 0.03);
     if (stall && F.stall === 'cricket') { stallT -= dt; if (stallT <= 0) { tones.cricket(); stallT = 1.1; } }
     if (stall && F.stall === 'cricket') want('stall', 1, 0.4); // (Airbus: "stall, stall"; the others shake the stick)
     if (!stall) stallT = 0;
-    const ovs = has(/^OVERSPEED/) ? 'overspeed' : has(/^(FLAP|GEAR) SPEED/) ? 'vfe' : null;
+    const ovs = hasW(/^OVERSPEED/) ? 'overspeed' : hasW(/^(FLAP|GEAR) SPEED/) ? 'vfe' : null;
     const ovTone = ovs && F[ovs];
     if (ovTone) { ovsT -= dt; if (ovsT <= 0) { tones[ovTone](); ovsT = ovTone === 'clacker' ? 0.5 : 0.62; } } else ovsT = 0;
-    if (has(/^CONFIG:/) && F.config) { cfgT -= dt; if (cfgT <= 0) { tones[F.config](); cfgT = F.config === 'horn' ? 0.9 : 0.62; } } else cfgT = 0;
+    if (hasW(/^CONFIG:/) && F.config) { cfgT -= dt; if (cfgT <= 0) { tones[F.config](); cfgT = F.config === 'horn' ? 0.9 : 0.62; } } else cfgT = 0;
     // damage: the master warning for a few seconds when something new goes
     const dmg = W.filter((t) => /LOST|F\/CTL|OUT OF CONTROL|OVERSTRESS/.test(t)).join('|');
     if (dmg && dmg !== mwSeen && F.master) mwT = 4;
@@ -434,9 +548,7 @@
     if (mwT > 0) { const b = mwT; mwT -= dt; const per = F.master === 'gong' ? 1.2 : 0.62; if (Math.floor(b / per) !== Math.floor(mwT / per) || b === 4) tones[F.master](); }
     // the GPWS: its modes, the bank angle, then the callouts waiting
     if (F.voice) {
-      for (const [re, prio, key, gap] of MODES) if (has(re)) want(key, prio, gap);
-      const bankLim = fam === 'airbus' ? 40 : 35;
-      if (air && Math.abs(s.phi) > bankLim && !(FG.systems && FG.systems.S && FG.systems.S.gpws && !FG.systems.S.gpws.sys)) { bankT += dt; if (bankT > 0.5) want('bankAngle', 7, 1.5); } else bankT = 0;
+      for (const [re, prio, key, gap] of MODES) if (hasW(re)) want(key, prio, gap);
     }
     pending = pending.filter((p) => now - p.at < 2500);
     for (const p of pending) wants.push(p);
@@ -471,9 +583,11 @@
   }
   FG.cocksnd = {
     say,
+    cabin: () => { const s = FG.pilot && FG.pilot.state; return !!(s && s.active && ready() && familyOf(s.spec) === 'airbus' && shot('chime.mp3', 0.6, spk)); }, // (the real A320 chime)
     bell: () => ours('fire'), // (the fire warning, once round)
     apOff: () => ours('ap'),
     familyOf, get family() { return fam; },
+    get real() { return Object.fromEntries(Object.entries(R).map(([k, r]) => [k, { on: !!r.src, g: Math.round(r.g.gain.value * 1000) / 1000 }])); }, // (the real loops: loaded, how loud)
     tones, fx, log,
     level() { // (the loudness now, 0 … 1: tests run muted)
       if (!meter) return 0;

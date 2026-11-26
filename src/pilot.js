@@ -401,7 +401,7 @@
     if (opts !== s.startOpts) s.ck = null; // (a checkpoint belongs to its flight: kept when it starts again)
     const n1At = (v) => Array(sp.engines).fill(v);
     Object.assign(s, {
-      active: true, loading: true, startOpts: opts, type, spec: sp, startAt: performance.now(),
+      active: true, loading: true, startOpts: opts, type, spec: sp, startAt: performance.now(), warn: [], m3: null, m2T: 0, closure: 0, gpA: null,
       lat: 0, lon: 0, h: 0, groundH: 0, V: 0, gamma: 0, psi: 0, theta: 0, phi: 0, alpha: 0,
       load: 0, onGround: true, landed: false, n1: n1At(IDLE_N1), lever: 0, rev: 0, gearDown: true, gear: 1,
       conf: sp.toConf, flapPos: sp.toConf, sb: 0, gs: 0, armed: sp.groundSpoilers, brake: 0, parking: false, afloor: false,
@@ -1614,6 +1614,38 @@
   }
 
   // ---------- warnings and callouts ----------
+  // The ground proximity warnings, as Honeywell's EGPWS gives them (its envelopes, simplified): mode 1 sinking too
+  // fast for the height (SINK RATE, then PULL UP), mode 2 the ground coming up too fast (TERRAIN TERRAIN, then PULL UP),
+  // mode 3 height lost after take-off (DON'T SINK), mode 4 too low not set up to land (TOO LOW GEAR / FLAPS / TERRAIN),
+  // mode 6 BANK ANGLE; and about to hit the ground in under 9 s. (Mode 5 GLIDE SLOPE and the terrain ahead: src/aircraft.js.)
+  // a: radio height (ft), vs (ft/min), spd (kt).
+  function gpws(w, a, vs, spd) {
+    const sink = -vs, dt = s.gpT ? Math.min(0.5, (performance.now() - s.gpT) / 1000) : 0;
+    s.gpT = performance.now();
+    // (the radio height's rate of fall, smoothed: the ground rising under it counts as much as going down)
+    if (s.gpA != null && dt > 0) s.closure = (s.closure || 0) + (((s.gpA - a) / dt) * 60 - (s.closure || 0)) * (1 - Math.exp(-dt / 0.6));
+    s.gpA = a;
+    const sp = s.spec, flapsLdg = s.conf >= Math.min(sp.finalConf, lastConf()), gearDn = sp.gear === 'fixed' || s.gear > 0.99;
+    const landing = gearDn && flapsLdg;
+    // mode 3: armed from lift-off until 1500 ft (s.m3: the most height reached)
+    if (s.m3 && a > 1500) s.m3 = null;
+    if (s.m3) s.m3.max = Math.max(s.m3.max, a);
+    const toGo = sink > 0 ? a / (sink / 60) : Infinity; // (seconds to the ground)
+    const m1Pull = a > 30 && a < 2450 && sink > 1710 + 3.3 * Math.max(0, a - 284);
+    const m1Sink = a > 30 && a < 2450 && sink > 964 + 1.66 * Math.max(0, a - 10);
+    const c = s.closure || 0;
+    const m2 = a > 30 && (landing ? a < Math.min(790, 30 + (c - 3000) * 0.25) : a < Math.min(spd > 220 ? 2450 : 1650, 30 + (c - 2000) * 0.4));
+    s.m2T = m2 ? (s.m2T || 0) + dt : 0;
+    if ((m1Pull || (s.m2T > 1.6) || (toGo < 9 && !landing && a < 2500)) && !s.landed) w.push(['PULL UP', 'red']);
+    else if (m2) w.push(['TERRAIN TERRAIN', 'red']);
+    else if (m1Sink) w.push(['SINK RATE', 'red']);
+    if (s.m3 && s.m3.max > 50 && sink > 0 && s.m3.max - a > Math.max(20, 0.1 * s.m3.max)) w.push(["DON'T SINK", 'red']);
+    if (!s.m3 && sink > -500) {
+      if (!gearDn && a < Math.min(1000, 500 + Math.max(0, spd - 190) * 8.3)) w.push([spd < 190 ? 'TOO LOW — GEAR' : 'TOO LOW — TERRAIN', 'red']);
+      else if (gearDn && !flapsLdg && a < Math.min(1000, 245 + Math.max(0, spd - 159) * 8)) w.push([spd < 159 ? 'TOO LOW — FLAPS' : 'TOO LOW — TERRAIN', 'red']);
+    }
+    if (a > 30 && Math.abs(s.phi) > 35) w.push(['BANK ANGLE', 'amber']);
+  }
   function warnings() {
     const w = [];
     const a = agl(), vs = vsFpm(), spd = ias();
@@ -1642,14 +1674,10 @@
       if (!s.onGround && s.load > s.spec.gLimit + 0.05) w.push([`OVERSTRESS ${s.load.toFixed(1)} g`, 'red']);
       damageWarnings(w);
       if (s.deep) w.push(['DEEP STALL — full nose down', 'red']);
-      const sinking = vs < 0 ? a / (-vs / 60) : Infinity; // seconds to the ground
-      const landing = s.gear > 0.99 && s.conf >= Math.min(s.spec.finalConf, lastConf());
-      if (a < 2500 && sinking < 9 && !landing) w.push(['PULL UP', 'red']);
-      else if (a < 2500 && vs < -Math.max(1500, 1000 + a * 1.2)) w.push(['SINK RATE', 'red']);
-      if (a < 500 && s.gear < 0.99 && vs < 0) w.push(['TOO LOW — GEAR', 'red']);
-      else if (a < 245 && s.conf < Math.min(s.spec.finalConf, lastConf()) && vs < 0) w.push(['TOO LOW — FLAPS', 'red']);
+      gpws(w, a, vs, spd);
       if (s.gearDown !== (s.gear > 0.99) && s.gear > 0 && s.gear < 1) w.push(['GEAR IN TRANSIT', 'amber']);
     }
+    if (s.onGround) { s.m3 = { max: 0 }; s.closure = 0; s.gpA = null; } // (mode 3 armed for the take-off)
     // radio altitude callouts on the way down
     if (!s.onGround && FG.sound && FG.sound.on) {
       const prev = s.prevAgl;

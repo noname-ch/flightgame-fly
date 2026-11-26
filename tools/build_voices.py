@@ -54,13 +54,14 @@ COMMON = {
     'youHaveControl': 'You have control.',
     'windshear': 'Windshear, windshear, windshear.',
     'overspeed': 'Overspeed.',
+    'dontSink': "Don't sink!",
 }
 FAMILIES = {
     'airbus': {
         'voice': 'en_US-john-medium', 'length': 0.86, 'hp': 300, 'lp': 4200, 'drive': 4,
         'words': {**COMMON, 'a2500': 'Twenty five hundred.', 'retard': 'Retard. Retard.', 'minimum': 'Minimum.',
                   'stall': 'Stall! Stall!', 'thrustLeversClimb': 'Thrust levers, climb.', 'speed': 'Speed, speed, speed.',
-                  'dualInput': 'Dual input.'},
+                  'dualInput': 'Dual input.', 'dontSink': "Don't sink!"},
     },
     'boeing': {
         'voice': 'en_US-joe-medium', 'length': 0.92, 'hp': 280, 'lp': 4000, 'drive': 5,
@@ -78,7 +79,7 @@ FAMILIES = {
                                          'v1', 'rotate', 'a1000', 'a0500', 'a0100', 'a0050', 'a0040', 'a0030', 'a0020',
                                          'a0010', 'hundredAbove', 'evacuate', 'tailStrike', 'config', 'youHaveControl',
                                          'overspeed', 'bankAngle', 'terrainAhead', 'terrainAheadPullup', 'cautionTerrain',
-                                         'windshear', 'topOfDescent')}
+                                         'windshear', 'topOfDescent', 'dontSink')}
                  | {'a2500': 'Two thousand five hundred.', 'minimum': 'Decide.', 'retard': 'Retard.', 'stall': 'Stall.'},
     },
 }

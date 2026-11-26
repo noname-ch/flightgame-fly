@@ -611,7 +611,7 @@
     if (!S || !S.gpws) return w;
     const G = S.gpws;
     let out = w.filter(([t]) => {
-      if (!G.sys && /^(PULL UP|SINK RATE|TOO LOW)/.test(t)) return false;
+      if (!G.sys && /^(PULL UP|SINK RATE|TOO LOW|TERRAIN TERRAIN|DON'T SINK|BANK ANGLE)/.test(t)) return false;
       if (!G.flap && /^TOO LOW — FLAPS/.test(t)) return false;
       if (G.ldg3 && /^TOO LOW — FLAPS/.test(t) && s.conf >= s.spec.conf.length - 2) return false;
       return true;

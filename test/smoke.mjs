@@ -21,7 +21,7 @@ const warnings = [];
 // ---------- static server on a free port ----------
 const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css',
   '.json': 'application/json', '.webmanifest': 'application/manifest+json', '.svg': 'image/svg+xml',
-  '.png': 'image/png', '.mp3': 'audio/mpeg', '.webp': 'image/webp', '.glb': 'model/gltf-binary' };
+  '.png': 'image/png', '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.webp': 'image/webp', '.glb': 'model/gltf-binary' };
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, 'http://x');
   let file = path.join(ROOT, decodeURIComponent(url.pathname));
@@ -334,7 +334,7 @@ try {
         await evaluate(() => FG.pilot.stop());
       }
       // the flight deck's sounds (src/cocksnd.js; muted): each family its own voice and tones, the DC-3 none
-      step('cockpit sounds: a 737 calls "one thousand" in its own voice and wails as the wing tears off; a DC-3 says nothing');
+      step('cockpit sounds: a 737 calls "one thousand" in its own voice, its recorded inside plays, it wails as the wing tears off (recorded metal); a DC-3 says nothing');
       const sounds = {};
       for (const type of ['B737-800', 'DC-3']) {
         await evaluate((type) => {
@@ -347,11 +347,15 @@ try {
         await sleep(1500);
         await evaluate(() => { FG.cocksnd.log.length = 0; FG.pilot.state.calls = {}; FG.pilot.api.speak('one thousand'); FG.pilot.fail('wingL'); });
         await waitFor(() => FG.cocksnd.log.some((x) => x.what === 'tear') && FG.cocksnd.log.some((x) => x.what === 'say a1000'), 5000);
-        sounds[type] = await evaluate(() => ({ fam: FG.cocksnd.family, log: FG.cocksnd.log.map((x) => x.what), lvl: FG.cocksnd.level() }));
+        await waitFor(() => FG.cocksnd.real['bed-idle'] && FG.cocksnd.real['bed-idle'].on && FG.cocksnd.real['bed-power'].on, 15000);
+        sounds[type] = await evaluate(() => ({ fam: FG.cocksnd.family, log: FG.cocksnd.log.map((x) => x.what), lvl: FG.cocksnd.level(), real: FG.cocksnd.real }));
         await evaluate(() => FG.pilot.stop());
       }
       const b = sounds['B737-800'], d = sounds['DC-3'];
       if (b.fam !== 'boeing' || !b.log.includes('say a1000') || !b.log.includes('tear') || !b.log.includes('wailer') || !(b.lvl > 0)) errors.push(`cockpit sounds, 737: ${JSON.stringify(b)}`);
+      // (the real recordings: the inside of a 737 and a radial engine, the GPWS words, the tearing metal: sounds/real)
+      for (const [nm, x] of [['737', b], ['DC-3', d]]) if (!x.real['bed-idle'] || !x.real['bed-idle'].on || !x.real['bed-power'].on || !x.real.fire.on) errors.push(`cockpit sounds, ${nm}: the real recordings did not load: ${JSON.stringify(x.real)}`);
+      if (!b.log.some((w) => /^rec tear-/.test(w))) errors.push(`cockpit sounds, 737: the wing tore off without the recorded tearing: ${JSON.stringify(b.log)}`);
       if (d.fam !== 'classic' || d.log.some((w) => /^say /.test(w)) || !d.log.includes('tear')) errors.push(`cockpit sounds, DC-3: ${JSON.stringify(d)}`);
       await evaluate(() => FG.sound.set({ on: false }));
     }
