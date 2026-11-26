@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Smoke test for the fly page: serves this repo (the game comes from the flightgame/ submodule), loads index.html in
 // headless Chrome and flies: the start screen, an A350 lined up at Zurich (TOGA, the keys are the plane's, its 3D
-// cockpit, a checkpoint, Esc menu, leave), then each of the sixteen types starts and spools up; the cockpit sounds (muted). Fails on any script
+// cockpit, a checkpoint, Esc menu, leave), then each of the eighteen types starts and spools up; the cockpit sounds (muted). Fails on any script
 // error, console.error or missing file of our own.
 //
 //   node test/smoke.mjs            (needs Node 22+ and Chrome or Chromium; CHROME=/path overrides)
@@ -205,7 +205,7 @@ try {
     out.xwind = q('#fs-xwind').textContent;
     return out;
   });
-  if (ss.cards !== ss.types || ss.cards < 16 || !ss.rw || !ss.map || ss.livs < 2 || !ss.go) errors.push(`start screen: ${JSON.stringify(ss)}`);
+  if (ss.cards !== ss.types || ss.cards < 18 || !ss.rw || !ss.map || ss.livs < 2 || !ss.go) errors.push(`start screen: ${JSON.stringify(ss)}`);
   if (!(ss.props > 0 && ss.props < ss.cards)) errors.push(`start screen: the Propellers filter shows ${ss.props} of ${ss.cards}`);
   if (!ss.suggest.includes('GVA') || !ss.gvaRw) errors.push(`start screen: searching "genev" did not find Geneva and its runways: ${JSON.stringify(ss)}`);
   if (!/^12:00 local at GVA/.test(ss.clock) || !/crosswind/.test(ss.xwind)) errors.push(`start screen: time or wind not shown: ${JSON.stringify(ss)}`);
@@ -306,9 +306,9 @@ try {
       if (!dive.gone || !dive.blasts.includes('pool') || dive.pieces.length < 2) errors.push(`crashes: a fast dive into the ground did not go up in a fireball: ${JSON.stringify(dive)}`);
       await evaluate(() => { FG.pilot.stop(); const el = document.getElementById('pilot-start'); if (el && el.querySelector('[data-ps=no]')) el.querySelector('[data-ps=no]').click(); });
       // every other type: starts on the runway with its own engines and spools up at take-off thrust
-      step('fly it yourself: each of the sixteen aircraft starts, is drawn and spools up');
+      step('fly it yourself: each of the eighteen aircraft starts, is drawn and spools up');
       const types = await evaluate(() => Object.keys(FG.pilot.types));
-      if (types.length < 16) errors.push(`fly it yourself: only ${types.length} aircraft`);
+      if (types.length < 18) errors.push(`fly it yourself: only ${types.length} aircraft`);
       for (const type of types) {
         await evaluate((type) => {
           const r = G.airportRunways('ZRH')[0];

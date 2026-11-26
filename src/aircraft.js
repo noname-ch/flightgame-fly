@@ -8,6 +8,11 @@
 //     pump), blue (an electric pump, the RAT) and the PTU between green and yellow. Green raises the gear (down it
 //     falls by gravity) and works the normal brakes; yellow the nose wheel steering and the alternate brakes; the
 //     flaps need green and yellow (half speed on one); two systems lost: alternate law.
+//   - The A330s and A340s (PLAN): no PTU but an engine-driven pump per system and engine (the A330: green and blue
+//     on engine 1, green and yellow on engine 2; the A340: green on 1 and 4, blue on 2, yellow on 3), an electric
+//     pump for each system and the RAT on green. Their FUEL has a trim tank in the tail (its fuel goes forward in the
+//     cruise, T TK FEED AUTO; ISOL keeps it there); the A330 a standby pump in each wing, the A340 a feed tank per
+//     engine with a main and a standby pump and its own cross-feed valve (open two: one engine's pumps feed the other).
 //   - FUEL: left, centre and right tanks, two pumps in each wing and two in the centre (MODE SEL AUTO runs them
 //     while there's fuel), the cross-feed valve. Engines burn from their own wing (the centre first); a wing with
 //     both pumps off feeds by gravity only below FL150; an empty side (cross-feed shut) or a starved engine flames
@@ -41,23 +46,50 @@
 
   // which engines drive which hydraulic system, and which wing tank feeds them
   const hydOf = (n) => (n >= 4 ? { G: [0, 3], B: [1], Y: [2] } : n === 3 ? { G: [0], B: [1], Y: [2] } : { G: [0], B: [], Y: [n - 1] });
+  // the systems' layout of the type flown: the A320 family's, the A330's or the A340's
+  function planOf(type, n) {
+    const t = String(type || '').toUpperCase();
+    if (/^A33/.test(t) && n === 2) return { wide: 'a330', edp: [['G', 0], ['B', 0], ['G', 1], ['Y', 1]], ptu: false, rat: 'G', trim: true };
+    if (/^A34/.test(t) && n === 4) return { wide: 'a340', edp: [['G', 0], ['B', 1], ['Y', 2], ['G', 3]], ptu: false, rat: 'G', trim: true };
+    const m = hydOf(n);
+    return { wide: null, edp: ['G', 'B', 'Y'].flatMap((k) => m[k].map((i) => [k, i])), ptu: true, rat: 'B', trim: false };
+  }
+  let PLAN = planOf(null, 2);
+  // the switches the type's systems have (fresh() may come before the type is known: begin() shapes it again)
+  function shape(x, n) {
+    const H = x.hyd, F = x.fuel;
+    if (H.plan === PLAN.wide && Object.keys(H.edp).length === PLAN.edp.length) return;
+    H.plan = PLAN.wide;
+    H.edp = Object.fromEntries(PLAN.edp.map(([k, i]) => [k + i, 1]));
+    H.ptu = PLAN.ptu ? 1 : 0;
+    F.pump = { L1: 1, L2: 1, R1: 1, R2: 1, CL: 1, CR: 1 };
+    if (PLAN.wide === 'a330') Object.assign(F.pump, { LS: 1, RS: 1 });
+    if (PLAN.wide === 'a340') for (let i = 0; i < n; i++) Object.assign(F.pump, { [`E${i}`]: 1, [`E${i}S`]: 1 });
+    F.xfeedE = Array(n).fill(0);
+  }
   const sideOf = (i, n) => (n === 3 ? (i === 0 ? 0 : i === 2 ? 1 : -1) : i < n / 2 ? 0 : 1); // (-1: the middle engine, from the centre)
 
   function fresh(x, n) {
     S = x;
+    PLAN = planOf(s.type, n);
     x.elec = { bat: [1, 1], gen: Array(n).fill(1), apuGen: 1, ext: 0, busTie: 1, galley: 1, gen1Line: 1, ratMan: 0, rat: 0, batCharge: [1, 1], ac: [true, true], level: 'normal' };
-    x.hyd = { engPump: Array(n).fill(1), bElec: 1, yElec: 0, ptu: 1, p: { G: 3000, B: 3000, Y: 3000 } };
-    x.fuel = { L: 0, C: 0, R: 0, cap: 0, wingCap: 0, pump: { L1: 1, L2: 1, R1: 1, R2: 1, CL: 1, CR: 1 }, modeSel: 'AUTO', xfeed: 0, starve: Array(n).fill(0), used: 0, imbal: 0 };
+    x.hyd = { engPump: Array(n).fill(1), bElec: 1, yElec: 0, ptu: 1, p: { G: 3000, B: 3000, Y: 3000 }, edp: {}, elecP: { G: 0, B: 0, Y: 0 } };
+    x.fuel = { L: 0, C: 0, R: 0, T: 0, cap: 0, wingCap: 0, pump: { L1: 1, L2: 1, R1: 1, R2: 1, CL: 1, CR: 1 }, modeSel: 'AUTO', xfeed: 0,
+      xfeedE: Array(n).fill(0), trim: 'AUTO', tXfr: 0, starve: Array(n).fill(0), used: 0, imbal: 0 };
+    shape(x, n);
     x.air = { engBleed: Array(n).fill(1), pack: [1, 1], cabAlt: 0, cabVs: 0, mode: 'AUTO', manVs: 0, ditching: 0, paxMasks: 0, hypoxia: 0 };
     x.ice = { wing: 0, eng: 0, probe: 'AUTO' };
     x.adirs = { ir: [0, 1, 2].map(() => ({ mode: 'NAV', ok: true, align: 0, att: 0, offT: 0 })), adr: [1, 1, 1], attHdg: 'NORM', airData: 'NORM' };
     x.gpws = { sys: 1, terr: 1, gs: 1, flap: 1, ldg3: 0, terrAhead: 0 };
     x.misc = { evac: 0, evacT: 0, crewOxy: 1, rcdr: 0, emerExit: 'ARM', iceInd: 1, askid: 1, chrono: null, chronoRun: false, terrNd: [0, 0], burst: false,
-      bright: { pfd1: 1, nd1: 1, pfd2: 1, nd2: 1, ewd: 1, sd: 1 }, ecp: null, all: 0, allT: 0, tocfg: 0, cleared: [], callT: 0 };
+      bright: { pfd1: 1, nd1: 1, pfd2: 1, nd2: 1, ewd: 1, sd: 1 }, ecp: null, all: 0, allT: 0, tocfg: 0, cleared: [], callT: 0,
+      taxiCam: 0, oans: 0, oansRange: 1 };
   }
   function begin(x) {
     S = x;
     const n = S.eng.length, F = S.fuel, cap = Math.round(s.mass * 0.3);
+    PLAN = planOf(s.type, n);
+    shape(S, n);
     F.cap = cap; F.wingCap = Math.round(cap * 0.32);
     // the fuel for the flight: the trip (about 450 kt over the ground) and 45 minutes, more on a long flight
     const ffH = s.mass * 0.032; // kg/h, all engines, in the cruise
@@ -69,6 +101,10 @@
     need = clamp(need, cap * 0.12, cap);
     F.L = F.R = Math.round(Math.min(need / 2, F.wingCap));
     F.C = Math.round(Math.max(0, need - F.L - F.R));
+    // the trim tank (A330, A340): 6 % of the fuel, from the centre's share first, then the wings'
+    F.T = PLAN.trim ? Math.round(need * 0.06) : 0;
+    { const fromC = Math.min(F.C, F.T); F.C -= fromC; F.L -= (F.T - fromC) / 2; F.R -= (F.T - fromC) / 2; }
+    F.tXfr = 0;
     F.used = 0;
     S.air.cabAlt = s.onGround ? s.groundH / FT : clamp((s.h / FT) * 0.21, s.groundH / FT, 8000);
     S.misc.chrono = null; S.misc.chronoRun = false;
@@ -117,11 +153,16 @@
 
     // HYD
     const H = S.hyd, map = hydOf(n);
-    const want = {
-      G: map.G.some((i) => H.engPump[i] && run(i) && S.eng[i].n1 > 15),
-      Y: map.Y.some((i) => H.engPump[i] && run(i) && S.eng[i].n1 > 15) || (H.yElec && ac),
-      B: map.B.some((i) => H.engPump[i] && run(i) && S.eng[i].n1 > 15) || (H.bElec && ac && S.eng.some((e) => e.run === 1)) || (E.rat && A.ias() > 140),
+    const engP = (k) => PLAN.edp.some(([sy, i]) => sy === k && edpOn(sy, i) && run(i) && (S.eng[i].n1 ?? s.n1[i] ?? 0) > 15);
+    const ratP = E.rat && A.ias() > 140;
+    const want = PLAN.wide ? {
+      G: engP('G') || (H.elecP.G && ac) || ratP, B: engP('B') || (H.elecP.B && ac), Y: engP('Y') || (H.elecP.Y && ac),
+    } : {
+      G: engP('G'),
+      Y: engP('Y') || (H.yElec && ac),
+      B: engP('B') || (H.bElec && ac && S.eng.some((e) => e.run === 1)) || ratP,
     };
+    void map;
     // the PTU: one of green and yellow drives the other (AUTO, when they differ by 500 psi)
     if (H.ptu && ac) { if (want.G && !want.Y) want.Y = 'ptu'; else if (want.Y && !want.G) want.G = 'ptu'; }
     for (const k of ['G', 'B', 'Y']) {
@@ -157,10 +198,18 @@
     const gravity = !air || altFt < 15000;
     const ctrAuto = F.modeSel === 'AUTO' && S.eng.some((e) => e.run === 1);
     const ctrFeeds = F.C > 0 && ac && ((F.pump.CL || F.pump.CR) && (F.modeSel === 'MAN' || ctrAuto));
-    const wingPumps = [ac && (F.pump.L1 || F.pump.L2), ac && (F.pump.R1 || F.pump.R2)];
+    const wingPumps = [ac && (F.pump.L1 || F.pump.L2 || F.pump.LS), ac && (F.pump.R1 || F.pump.R2 || F.pump.RS)];
     const tank = (k) => (k === 0 ? 'L' : 'R');
     let burned = 0;
-    for (let i = 0; i < n; i++) {
+    // the trim tank's fuel goes forward in the cruise (and whenever the wings run low), into the centre or the wings
+    F.tXfr = 0;
+    if (F.T > 0 && F.trim === 'AUTO' && ac && air && ((altFt > 20000 && F.C < 1000) || F.L + F.R < F.wingCap * 0.25)) {
+      const t = Math.min(F.T, 1.5 * dt);
+      F.T -= t; F.tXfr = 1;
+      if (F.C > 0 || ctrFeeds) F.C += t; else { F.L += t / 2; F.R += t / 2; }
+    }
+    if (PLAN.wide === 'a340') burned = feed340(F, n, ac, gravity, ctrFeeds, dt);
+    else for (let i = 0; i < n; i++) {
       const e = S.eng[i];
       const ff = e.run === 1 || e.start ? ffOf(i) : 0; // kg/s
       const side = sideOf(i, n);
@@ -177,6 +226,7 @@
       if (!from) { F.starve[i] += dt; } else F.starve[i] = 0;
       if (from && ff) { const take = Math.min(F[from], ff * dt); F[from] -= take; burned += take; }
     }
+    // (the A340: each engine from its own feed tank, the cross-feed line between those whose valve is open)
     // a wing torn open (src/pilot.js s.dmg.leak) pours its fuel out
     if (s.dmg && s.dmg.leak) for (let k = 0; k < 2; k++) if (s.dmg.leak[k] > 0) { const t = Math.min(F[tank(k)], 12 * dt); F[tank(k)] -= t; burned += t; }
     F.used += burned;
@@ -265,6 +315,30 @@
     if (X.ecp === 'ALL') { X.allT += dt; if (X.allT > 1) { X.allT = 0; X.all = (X.all + 1) % SD_PAGES.length; } }
   }
 
+  // The A340's feeding: each engine's feed tank (in its wing) with a main and a standby pump; below FL150 gravity
+  // feeds it without them. An engine whose own tank can't feed it, with its X FEED valve open, draws from the line:
+  // another engine's tank with its valve open and a pump running. The centre's pumps feed every engine first.
+  function feed340(F, n, ac, gravity, ctrFeeds, dt) {
+    const tank = (i) => (i < n / 2 ? 'L' : 'R');
+    const pumps = (i) => ac && (F.pump[`E${i}`] || F.pump[`E${i}S`]);
+    let burned = 0;
+    for (let i = 0; i < n; i++) {
+      const e = S.eng[i];
+      const ff = e.run === 1 || e.start ? ffOf(i) : 0;
+      let from = null;
+      if (ctrFeeds) from = 'C';
+      else if (F[tank(i)] > 0 && (pumps(i) || gravity)) from = tank(i);
+      if (F.xfeedE[i] && (!from || (from !== 'C' && !pumps(i)))) {
+        for (let j = 0; j < n; j++) if (j !== i && F.xfeedE[j] && pumps(j) && F[tank(j)] > 0) { from = tank(j); break; }
+      }
+      if (!from) F.starve[i] += dt; else F.starve[i] = 0;
+      if (from && ff) { const take = Math.min(F[from], ff * dt); F[from] -= take; burned += take; }
+    }
+    return burned;
+  }
+  // an engine-driven hydraulic pump: switched on (the A320's one pump per engine, or the A330's / A340's per system)
+  const edpOn = (k, i) => (PLAN.wide ? !!S.hyd.edp[k + i] : !!S.hyd.engPump[i]);
+
   // fuel flow, kg/s, of engine i: from about 12 % at idle to its share of the cruise flow at climb thrust
   function ffOf(i) {
     const n = S.eng.length, idle = A.idle(), n1 = S.eng[i].n1 || s.n1[i] || 0;
@@ -333,7 +407,14 @@
       case 'engPump': H.engPump[i] = tog(v, H.engPump[i]); break;
       case 'bElec': H.bElec = tog(v, H.bElec); break;
       case 'yElec': H.yElec = tog(v, H.yElec); break;
-      case 'ptu': H.ptu = tog(v, H.ptu); break;
+      case 'ptu': if (PLAN.ptu) H.ptu = tog(v, H.ptu); break;
+      case 'edp': H.edp[v] = H.edp[v] ? 0 : 1; break;
+      case 'elecPump': H.elecP[v] = H.elecP[v] ? 0 : 1; break;
+      case 'xfeedE': F.xfeedE[i] = tog(v, F.xfeedE[i]); break;
+      case 'trimFeed': F.trim = v !== undefined ? v : F.trim === 'AUTO' ? 'ISOL' : 'AUTO'; break;
+      case 'taxiCam': X.taxiCam = tog(v, X.taxiCam); break;
+      case 'oans': X.oans = tog(v, X.oans); break;
+      case 'oansRange': X.oansRange = v !== undefined ? v : cyc(X.oansRange, [0.5, 1, 2, 5]); break;
       case 'fuelPump': F.pump[i] = tog(v, F.pump[i]); break;
       case 'modeSel': F.modeSel = v !== undefined ? v : F.modeSel === 'AUTO' ? 'MAN' : 'AUTO'; break;
       case 'xfeed': F.xfeed = tog(v, F.xfeed); break;
@@ -418,11 +499,15 @@
     }
     const anyRun = S.eng.some((e) => e.run === 1);
     if (anyRun) {
-      if (!F.pump.L1 && !F.pump.L2) c.push('FUEL L TK PUMP 1+2 LO PR');
-      if (!F.pump.R1 && !F.pump.R2) c.push('FUEL R TK PUMP 1+2 LO PR');
+      if (PLAN.wide === 'a340') S.eng.forEach((e, i) => { if (!F.pump[`E${i}`] && !F.pump[`E${i}S`]) c.push(`FUEL ENG ${i + 1} FEED PUMPS LO PR`); });
+      else {
+        if (!F.pump.L1 && !F.pump.L2 && !F.pump.LS) c.push(`FUEL L TK PUMP 1+2${PLAN.wide ? '+STBY' : ''} LO PR`);
+        if (!F.pump.R1 && !F.pump.R2 && !F.pump.RS) c.push(`FUEL R TK PUMP 1+2${PLAN.wide ? '+STBY' : ''} LO PR`);
+      }
       if (F.C > 300 && !F.pump.CL && !F.pump.CR) c.push('FUEL CTR TK PUMPS OFF');
     }
     if (Math.abs(F.imbal) > F.wingCap * 0.2) c.push('FUEL IMBALANCE');
+    if (F.T > 0 && F.trim === 'ISOL' && air && F.L + F.R < F.wingCap * 0.25) c.push('FUEL TRIM TK XFR FAULT');
     if ((F.L < F.wingCap * 0.1 || F.R < F.wingCap * 0.1) && F.C < 50) c.push(`FUEL ${F.L < F.wingCap * 0.1 && F.R < F.wingCap * 0.1 ? 'L+R' : F.L < F.wingCap * 0.1 ? 'L' : 'R'} WING TK LO LVL`);
     S.eng.forEach((e, i) => { if (F.starve[i] > 2 && e.master) c.push(`FUEL ENG ${i + 1} NO FEED`); });
     if (air && R.pack[0] + R.pack[1] === 0) c.push('AIR PACK 1+2 OFF');
@@ -464,17 +549,22 @@
       const ks = name.replace(/^HYD | SYS LO PR$/g, '').split('+');
       const map = hydOf(S.eng.length);
       for (const k of ks) {
-        for (const i of map[k] || []) if (!H.engPump[i]) cy(`-${k === 'G' ? 'GREEN' : k === 'Y' ? 'YELLOW' : 'BLUE'} ENG ${i + 1} PUMP .. ON`);
+        const NM = k === 'G' ? 'GREEN' : k === 'Y' ? 'YELLOW' : 'BLUE';
+        for (const [sy, i] of PLAN.edp) if (sy === k && !edpOn(sy, i)) cy(`-${NM} ENG ${i + 1} PUMP .. ON`);
+        void map;
+        if (PLAN.wide) { if (!H.elecP[k]) cy(`-${NM} ELEC PUMP ....... ON`); continue; }
         if (k === 'B' && !H.bElec) cy('-BLUE ELEC PUMP ...... AUTO');
         if (k === 'Y' && !H.yElec) cy('-YELLOW ELEC PUMP ...... ON');
         if ((k === 'G' || k === 'Y') && !H.ptu) cy('-PTU ................ AUTO');
       }
       if (ks.length >= 2) { wh('.ALTN LAW: PROT LOST'); if (ks.includes('G')) wh('.LDG GEAR: GRAVITY EXTN'); if (ks.includes('G') && ks.includes('Y')) wh('.FLAPS: STUCK'); add('-LAND ASAP', 'amber'); }
-    } else if (/^FUEL ([LR]) TK PUMP/.test(name)) cy(`-FUEL ${name[5]} TK PUMP 1+2 ..... ON`);
+    } else if (/^FUEL ([LR]) TK PUMP/.test(name)) cy(`-FUEL ${name[5]} TK PUMPS ........ ON`);
+    else if (/^FUEL ENG (\d) FEED PUMPS/.test(name)) { const k = name.match(/\d/)[0]; cy(`-ENG ${k} FEED PUMPS ...... ON`); cy(`-X FEED ${k} ............ OPEN`); }
+    else if (name === 'FUEL TRIM TK XFR FAULT') cy('-T TK FEED ............ AUTO');
     else if (name === 'FUEL CTR TK PUMPS OFF') cy('-CTR TK PUMPS ........ ON');
     else if (name === 'FUEL IMBALANCE') { cy('-FUEL X FEED ........ OPEN'); cy(`-${F.imbal > 0 ? 'R' : 'L'} TK PUMPS ......... OFF`); }
-    else if (/LO LVL/.test(name)) { if (!F.xfeed) cy('-FUEL X FEED ........ OPEN'); add('-LAND ASAP', 'amber'); }
-    else if (/NO FEED/.test(name)) { cy('-WING TK PUMPS ......... ON'); cy('-FUEL X FEED ........ OPEN'); wh('.BELOW FL150: GRAVITY FEED'); }
+    else if (/LO LVL/.test(name)) { if (!xfeedOpen()) cy('-FUEL X FEED ........ OPEN'); add('-LAND ASAP', 'amber'); }
+    else if (/NO FEED/.test(name)) { cy(PLAN.wide === 'a340' ? '-FEED TK PUMPS ......... ON' : '-WING TK PUMPS ......... ON'); cy('-FUEL X FEED ........ OPEN'); wh('.BELOW FL150: GRAVITY FEED'); }
     else if (/^AIR PACK/.test(name)) cy('-PACK 1+2 .............. ON');
     else if (name === 'AIR ENG BLEED OFF') { cy('-ENG BLEED ............ ON'); if (s.h / FT < 22500 && S.apu.avail) cy('-APU BLEED ............. ON'); }
     else if (/^NAV IR (\d)/.test(name)) {
@@ -495,10 +585,13 @@
     else if (name === 'F/CTL ALTN LAW') { wh('.PROT LOST'); wh('.MAX SPEED ........ 320 KT'); }
     else if (name === 'OXY CREW SUPPLY OFF') cy('-CREW SUPPLY ........... ON');
   }
+  const xfeedOpen = () => !!(S.fuel.xfeed || S.fuel.xfeedE.some((v) => v));
   function memo() {
     if (!S || !S.elec) return [];
     const m = [], X = S.misc, G = S.gpws;
-    if (S.fuel.xfeed) m.push('FUEL X FEED');
+    if (xfeedOpen()) m.push('FUEL X FEED');
+    if (S.fuel.tXfr) m.push('T TK XFR');
+    if (X.taxiCam && s.onGround) m.push('TAXI CAMERA');
     if (S.elec.rat) m.push('RAT OUT');
     if (S.elec.ext) m.push('EXT PWR');
     if (!G.sys) m.push('GPWS OFF');
@@ -624,15 +717,19 @@
         txt(String(p), x, 0.26, ok ? COL.g : COL.a, 0.05);
         line(x, 0.3, x, 0.62, ok ? COL.g : COL.a);
       });
-      const map = hydOf(n);
       for (const k of ['G', 'B', 'Y']) {
-        const x = 0.2 + ['G', 'B', 'Y'].indexOf(k) * 0.3;
-        (map[k] || []).forEach((i, j) => boxT(`${i + 1}`, x + (j - (map[k].length - 1) / 2) * 0.08, 0.7, Hy.engPump[i] && S.eng[i].run === 1 ? COL.g : COL.a));
+        const x = 0.2 + ['G', 'B', 'Y'].indexOf(k) * 0.3, mine = PLAN.edp.filter(([sy]) => sy === k);
+        mine.forEach(([sy, i], j) => boxT(`${i + 1}`, x + (j - (mine.length - 1) / 2) * 0.08, 0.7, edpOn(sy, i) && S.eng[i].run === 1 ? COL.g : COL.a));
       }
-      boxT('ELEC', 0.5, 0.8, Hy.bElec ? COL.g : COL.a);
-      boxT('ELEC', 0.8, 0.86, Hy.yElec ? COL.g : COL.d);
-      txt(`PTU ${Hy.ptu ? 'AUTO' : 'OFF'}`, 0.5, 0.48, Hy.ptu ? COL.g : COL.a, 0.038);
-      if (S.elec.rat) txt('RAT', 0.5, 0.92, COL.g, 0.04);
+      if (PLAN.wide) {
+        ['G', 'B', 'Y'].forEach((k, j) => boxT('ELEC', 0.2 + j * 0.3, 0.84, Hy.elecP[k] ? COL.g : COL.d));
+        if (S.elec.rat) txt('RAT', 0.2, 0.92, COL.g, 0.04);
+      } else {
+        boxT('ELEC', 0.5, 0.8, Hy.bElec ? COL.g : COL.a);
+        boxT('ELEC', 0.8, 0.86, Hy.yElec ? COL.g : COL.d);
+        txt(`PTU ${Hy.ptu ? 'AUTO' : 'OFF'}`, 0.5, 0.48, Hy.ptu ? COL.g : COL.a, 0.038);
+        if (S.elec.rat) txt('RAT', 0.5, 0.92, COL.g, 0.04);
+      }
     } else if (page === 'FUEL') {
       const F = S.fuel, kg = (x) => String(Math.round(x / 10) * 10);
       txt('F.USED', 0.5, 0.16, COL.w, 0.035); txt(`${kg(F.used)} KG`, 0.5, 0.22, COL.g, 0.045);
@@ -640,10 +737,18 @@
         boxT(kg(F[t]), x, 0.62, F[t] < (t === 'C' ? 1 : F.wingCap * 0.1) ? COL.a : COL.g);
         txt(t === 'C' ? 'CTR' : t === 'L' ? 'LEFT' : 'RIGHT', x, 0.7, COL.w, 0.032);
       });
-      const pm = (k, x) => boxT(k, x, 0.48, F.pump[k] ? COL.g : COL.a);
-      pm('L1', 0.12); pm('L2', 0.24); pm('CL', 0.44); pm('CR', 0.56); pm('R1', 0.76); pm('R2', 0.88);
-      txt(`X FEED ${F.xfeed ? 'OPEN' : 'SHUT'}`, 0.5, 0.36, F.xfeed ? COL.g : COL.w, 0.038);
-      txt(`FOB ${kg(F.L + F.C + F.R)} KG`, 0.5, 0.84, COL.g, 0.05);
+      const pm = (k, x, t = k, y = 0.48) => boxT(t, x, y, F.pump[k] ? COL.g : COL.a);
+      if (PLAN.wide === 'a340') {
+        for (let i = 0; i < n; i++) { const x = [0.09, 0.27, 0.73, 0.91][i]; pm(`E${i}`, x, `${i + 1}`); pm(`E${i}S`, x, 'S', 0.4); }
+        pm('CL', 0.44); pm('CR', 0.56);
+        txt(`X FEED ${F.xfeedE.map((v, i) => (v ? i + 1 : '·')).join(' ')}`, 0.5, 0.3, xfeedOpen() ? COL.g : COL.w, 0.036);
+      } else {
+        pm('L1', 0.12); pm('L2', 0.24); pm('CL', 0.44); pm('CR', 0.56); pm('R1', 0.76); pm('R2', 0.88);
+        if (PLAN.wide) { pm('LS', 0.18, 'STBY', 0.4); pm('RS', 0.82, 'STBY', 0.4); }
+        txt(`X FEED ${F.xfeed ? 'OPEN' : 'SHUT'}`, 0.5, 0.36, F.xfeed ? COL.g : COL.w, 0.038);
+      }
+      if (PLAN.trim) { boxT(kg(F.T), 0.5, 0.78, COL.g); txt(`TRIM ${F.tXfr ? '→ XFR' : F.trim}`, 0.66, 0.78, F.trim === 'ISOL' ? COL.w : COL.g, 0.03, 'left'); }
+      txt(`FOB ${kg(F.L + F.C + F.R + F.T)} KG`, 0.5, PLAN.trim ? 0.87 : 0.84, COL.g, 0.05);
       txt(`MODE ${F.modeSel}`, 0.5, 0.92, F.modeSel === 'AUTO' ? COL.g : COL.a, 0.032);
     } else if (page === 'BLEED' || page === 'COND') {
       const R = S.air;
@@ -708,7 +813,7 @@
     if (H.p.G < 1450 || H.p.Y < 1450) out.push([H.p.G < 1450 && H.p.Y < 1450 ? 'FLAPS STUCK' : 'FLAPS SLOW', COL.c]);
     if (H.p.Y < 1450) out.push(['NW STRG INOP', COL.c]);
     if (E.level !== 'normal') out.push([`ELEC: ${E.level.toUpperCase()}`, COL.a]);
-    if (S.fuel.xfeed) out.push(['FUEL X FEED OPEN', COL.w]);
+    if (xfeedOpen()) out.push(['FUEL X FEED OPEN', COL.w]);
     if (S.misc.burst) out.push(['TYRES BURST: BRK REDUCED', COL.a]);
     if (!apOk()) out.push(['INOP SYS: AP 1+2', COL.a]);
     return out;

@@ -733,6 +733,97 @@ export const MODULES = {
   }),
   // painted only: the thrust levers' quadrant under the 3D levers
   quadrant: () => ({ w: 307, h: 240, paint: (T) => { T.plate(0, 0, 307, 240, '#24272b'); T.label(153, 16, 'TOGA · FLX MCT · CL · IDLE', 9, '#9aa1aa'); }, controls: [] }),
+
+  // ---- the A330's and A340's own (src/aircraft.js PLAN) ----
+  // HYD without a PTU: an engine-driven pump per system and engine (the A330: green and blue on engine 1, green and
+  // yellow on engine 2; the A340: green on 1 and 4, blue on 2, yellow on 3), an electric pump per system, the RAT
+  // (on green).
+  hydW: ({ nEng }) => {
+    const H = () => (S() && S().hyd) || { edp: {}, elecP: {}, p: {} };
+    const edp = nEng >= 4 ? [['G', 0], ['B', 1], ['Y', 2], ['G', 3]] : [['G', 0], ['B', 0], ['G', 1], ['Y', 1]];
+    const NAME = { G: 'GREEN', B: 'BLUE', Y: 'YELLOW' };
+    const C = edp.map(([k, i], j) => pbC(42 + j * 62, 64, 40, {
+      top: () => lit('FAULT', 'amber', S() && S().eng[i] && S().eng[i].run === 1 && !H().edp[k + i]),
+      bot: () => lit('OFF', 'white', !H().edp[k + i]), click: () => set('edp', k + i), tip: `${NAME[k]} ENG ${i + 1} PUMP` }));
+    ['G', 'B', 'Y'].forEach((k, j) => C.push(pbC(52 + j * 83, 150, 40, {
+      top: () => lit('FAULT', 'amber', false), bot: () => lit('ON', 'blue', H().elecP[k]), click: () => set('elecPump', k), tip: `${NAME[k]} ELEC PUMP: ON on the ground without an engine, or when its engine pumps are lost` })));
+    C.push(pbC(135, 224, 34, { top: () => lit('', 'amber', false), bot: () => lit('MAN ON', 'blue', S() && S().elec && S().elec.rat), click: () => set('ratMan'), tip: 'RAT MAN ON: drops the ram air turbine (green pressure, and the emergency generator)' }));
+    return {
+      w: 270, h: 260,
+      paint: (T) => {
+        T.plate(0, 0, 270, 260); T.title(0, 14, 270, 'HYD');
+        edp.forEach(([k, i], j) => T.label(42 + j * 62, 96, `${k} ENG ${i + 1}`, 8));
+        ['G', 'B', 'Y'].forEach((k, j) => T.label(52 + j * 83, 182, `${k} ELEC`, 8));
+        T.label(195, 224, 'RAT MAN ON', 8, '#e9edf1', 'left');
+      },
+      controls: C,
+    };
+  },
+  // the A330's FUEL: two main pumps and a standby in each wing, the centre's pumps, the cross-feed, the trim tank's feed
+  fuel330: () => {
+    const Fu = () => (S() && S().fuel) || { pump: {} };
+    const pump = (x, y, k, tip) => pbC(x, y, 38, { top: () => lit('FAULT', 'amber', S() && S().eng.some((e) => e.run === 1) && !Fu().pump[k] && !/S$/.test(k)), bot: () => lit('OFF', 'white', !Fu().pump[k]), click: () => set('fuelPump', undefined, k), tip });
+    const L = [['L 1', 38, 58], ['L 2', 102, 58], ['R 1', 166, 58], ['R 2', 230, 58], ['L STBY', 38, 132], ['CTR L', 102, 132], ['CTR R', 166, 132], ['R STBY', 230, 132], ['MODE SEL', 38, 206], ['X FEED', 102, 206], ['T TK FEED', 166, 206]];
+    return {
+      w: 270, h: 260,
+      paint: (T) => { T.plate(0, 0, 270, 260); T.title(0, 14, 270, 'FUEL'); L.forEach(([l, x, y]) => T.label(x, y + 30, l, 8)); },
+      controls: [
+        pump(38, 58, 'L1', 'L TK PUMP 1'), pump(102, 58, 'L2', 'L TK PUMP 2'), pump(166, 58, 'R1', 'R TK PUMP 1'), pump(230, 58, 'R2', 'R TK PUMP 2'),
+        pump(38, 132, 'LS', 'L TK STBY PUMP: runs when the main pumps fail'), pump(102, 132, 'CL', 'CTR TK PUMP L'), pump(166, 132, 'CR', 'CTR TK PUMP R'), pump(230, 132, 'RS', 'R TK STBY PUMP'),
+        pbC(38, 206, 38, { top: () => lit('FAULT', 'amber', false), bot: () => lit('MAN', 'white', Fu().modeSel === 'MAN'), click: () => set('modeSel'), tip: 'MODE SEL: AUTO runs the centre pumps while there is fuel there' }),
+        pbC(102, 206, 38, { top: () => lit('OPEN', 'green', Fu().xfeed), bot: () => lit('ON', 'blue', Fu().xfeed), click: () => set('xfeed'), tip: 'X FEED: either wing feeds either engine' }),
+        pbC(166, 206, 38, { top: () => lit('XFR', 'green', Fu().tXfr), bot: () => lit('ISOL', 'white', Fu().trim === 'ISOL'), click: () => set('trimFeed'), tip: 'T TK FEED: the trim tank in the tail sends its fuel forward in the cruise (AUTO) · ISOL keeps it there' }),
+      ],
+    };
+  },
+  // the A340's FUEL: each engine its own feed tank with a main and a standby pump and its own cross-feed valve; the
+  // centre tank's pumps, the trim tank's feed, the mode selector
+  fuel340: () => {
+    const Fu = () => (S() && S().fuel) || { pump: {}, xfeedE: [] };
+    const C = [];
+    for (let i = 0; i < 4; i++) {
+      const x = 38 + i * 64;
+      C.push(pbC(x, 54, 32, { top: () => lit('FAULT', 'amber', S() && S().eng[i] && S().eng[i].run === 1 && !Fu().pump[`E${i}`]), bot: () => lit('OFF', 'white', !Fu().pump[`E${i}`]), click: () => set('fuelPump', undefined, `E${i}`), tip: `ENG ${i + 1} FEED TK MAIN PUMP` }));
+      C.push(pbC(x, 112, 32, { top: () => lit('FAULT', 'amber', false), bot: () => lit('OFF', 'white', !Fu().pump[`E${i}S`]), click: () => set('fuelPump', undefined, `E${i}S`), tip: `ENG ${i + 1} FEED TK STBY PUMP` }));
+      C.push(pbC(x, 170, 32, { top: () => lit('OPEN', 'green', Fu().xfeedE[i]), bot: () => lit('ON', 'blue', Fu().xfeedE[i]), click: () => set('xfeedE', undefined, i), tip: `X FEED ${i + 1}: engine ${i + 1} on the cross-feed line (open two: one feeds the other)` }));
+    }
+    C.push(pbC(38, 226, 32, { top: () => lit('FAULT', 'amber', false), bot: () => lit('OFF', 'white', !Fu().pump.CL), click: () => set('fuelPump', undefined, 'CL'), tip: 'CTR TK PUMP L' }));
+    C.push(pbC(102, 226, 32, { top: () => lit('FAULT', 'amber', false), bot: () => lit('OFF', 'white', !Fu().pump.CR), click: () => set('fuelPump', undefined, 'CR'), tip: 'CTR TK PUMP R' }));
+    C.push(pbC(166, 226, 32, { top: () => lit('XFR', 'green', Fu().tXfr), bot: () => lit('ISOL', 'white', Fu().trim === 'ISOL'), click: () => set('trimFeed'), tip: 'T TK FEED: the trim tank sends its fuel forward in the cruise (AUTO) · ISOL keeps it there' }));
+    C.push(pbC(230, 226, 32, { top: () => lit('FAULT', 'amber', false), bot: () => lit('MAN', 'white', Fu().modeSel === 'MAN'), click: () => set('modeSel'), tip: 'MODE SEL: AUTO runs the centre pumps while there is fuel there' }));
+    return {
+      w: 270, h: 260,
+      paint: (T) => {
+        T.plate(0, 0, 270, 260); T.title(0, 12, 270, 'FUEL', 11);
+        for (let i = 0; i < 4; i++) { const x = 38 + i * 64; T.label(x, 78, `ENG ${i + 1}`, 7); T.label(x, 136, `STBY ${i + 1}`, 7); T.label(x, 194, `X FEED ${i + 1}`, 7); }
+        [['CTR L', 38], ['CTR R', 102], ['T TK', 166], ['MODE', 230]].forEach(([l, x]) => T.label(x, 250, l, 7));
+      },
+      controls: C,
+    };
+  },
+  // the A340-500/-600's TAXI CAMERA: the fin and belly cameras' picture on the systems display, on the ground
+  taxiCam: () => ({
+    w: 48, h: 64, paint: (T) => { T.plate(0, 0, 48, 64); T.label(24, 9, 'TAXI', 7); T.label(24, 18, 'CAMERA', 6); },
+    controls: [pbC(24, 42, 30, { bot: () => lit('ON', 'blue', S() && S().misc && S().misc.taxiCam), click: () => set('taxiCam'), tip: 'TAXI CAMERA: the fin and belly cameras on the systems display (on the ground): the nose and main gear over the taxiway\'s centre line' })],
+  }),
+  // the A330neo's trackball (EIS2): the airport map (OANS) on the NDs, and its range
+  oans: () => {
+    const X = () => (S() && S().misc) || {};
+    return {
+      w: 150, h: 86,
+      paint: (T, b) => {
+        T.plate(0, 0, 150, 86, '#2c3035'); T.label(75, 9, 'CURSOR CTL', 7, '#9aa1aa');
+        const grd = b.createRadialGradient(68, 44, 3, 75, 50, 24);
+        grd.addColorStop(0, '#9aa1aa'); grd.addColorStop(1, '#24272b');
+        b.fillStyle = grd; b.beginPath(); b.arc(75, 50, 22, 0, 7); b.fill();
+      },
+      controls: [
+        pbC(24, 46, 30, { bot: () => lit('OANS', 'green', X().oans), click: () => set('oans'), tip: 'OANS: the airport map on both NDs (the stands, taxiways, runways and you)' }),
+        pbC(126, 46, 30, { bot: () => lit(`${X().oansRange || 1} NM`, 'white', true), click: () => set('oansRange'), tip: 'OANS range: 0.5 · 1 · 2 · 5 NM' }),
+        areaC(75, 50, 46, 46, 'Trackball: the wheel zooms the airport map', () => set('oansRange')),
+      ],
+    };
+  },
 };
 
 // ---------- the decks' layouts ----------
@@ -770,9 +861,31 @@ export const LAYOUTS = {
   },
 };
 LAYOUTS.a350.overhead = LAYOUTS.a320.overhead;
+// The A330s and A340s: the A320's deck (the same modules, the same places), with their own overhead HYD (no PTU)
+// and FUEL (a standby pump per wing and the trim tank on the A330; a feed tank, two pumps and a cross-feed valve per
+// engine on the A340) and what each version added:
+//   'a330'    A330-200, -300: the enhanced A330 (LCD screens and the ISIS since 2003)
+//   'a330neo' A330-800, -900: its EIS2 with the trackball for the airport map (OANS) on the pedestal
+//   'a340'    A340-200, -300: CRT screens and the three round standby instruments
+//   'a346'    A340-500, -600: LCDs, the ISIS, and the TAXI CAMERA (75 m long: the main gear is 33 m behind you)
+const swap = (list, from, to) => list.map((l) => (l[0] === from ? [to, ...l.slice(1)] : l));
+const wideOverhead = (fuel) => swap(swap(LAYOUTS.a320.overhead, 'hyd', 'hydW'), 'fuel', fuel);
+LAYOUTS.a330 = { ...LAYOUTS.a320, overhead: wideOverhead('fuel330') };
+LAYOUTS.a330neo = { ...LAYOUTS.a330, pedestal: [...LAYOUTS.a320.pedestal.filter((l) => l[0] !== 'parkBrk'), ['parkBrk', 340, 938], ['oans', 14, 936]] };
+LAYOUTS.a340 = { ...LAYOUTS.a320, overhead: wideOverhead('fuel340') };
+LAYOUTS.a346 = { ...LAYOUTS.a340, main: [...LAYOUTS.a320.main, ['taxiCam', 432, 188]] };
 export const SURFACES = { glareshield: [2560, 128, '#16181b'], main: [1024, 256, '#4b5058'], pedestal: [512, 1024, '#4b5058'], overhead: [1024, 1004, '#4b5058'] };
 // which deck each type flies with (the 3D flight deck where it has one; the 2D pages take the A320's otherwise)
-export const deckOf = (type) => (/^A35|^A38/i.test(type || '') ? 'a350' : /^A3[234]/i.test(type || '') ? 'a320' : null);
+export function deckOf(type) {
+  const t = String(type || '').toUpperCase();
+  if (/^A35|^A38/.test(t)) return 'a350';
+  if (/^A33(0-)?[89]|^A33[89]/.test(t)) return 'a330neo';
+  if (/^A33/.test(t)) return 'a330';
+  if (/^A34(0-)?[56]|^A34[56]/.test(t)) return 'a346';
+  if (/^A34/.test(t)) return 'a340';
+  if (/^A3[12]/.test(t)) return 'a320';
+  return null;
+}
 
 // A surface of a deck, built from its layout: a live panel (its picture, its controls).
 export function surface(name, kind, nEng, extraPaint) {

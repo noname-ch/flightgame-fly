@@ -2,9 +2,14 @@
 //   - 'a350' (A350s, A380): six windows in dark frames, the black glareshield with the FCU and the EFIS panels, six
 //     big landscape screens (information system outboard, PFD + ND in front of each pilot, the engine and warning
 //     display in the middle, the systems display below it), the pedestal with the keyboards (KCCU);
-//   - 'a320' (A320, A330, A340): a narrower deck with the A320 family's six square screens (PFD, ND, the E/WD over
-//     the SD in the middle, ND, PFD), the standby instrument, the gear lever and the autobrake beside them, the two
-//     MCDUs at the front of the pedestal.
+//   - 'a320' (A320): a narrower deck with the A320 family's six square screens (PFD, ND, the E/WD over the SD in the
+//     middle, ND, PFD), the standby instrument, the gear lever and the autobrake beside them, the two MCDUs at the
+//     front of the pedestal;
+//   - the A330s and A340s: the same deck in their wider nose, each version as it was built (src/panels.js deckOf):
+//     'a330' (A330-200, -300) LCD screens and the ISIS; 'a330neo' (A330-900) the same with the trackball and the
+//     airport map (OANS) on the NDs; 'a340' (A340-300) CRT screens and the three round standby instruments; 'a346'
+//     (A340-600) LCDs, the ISIS and the TAXI CAMERA's picture on the SD. Their overhead HYD and FUEL panels are
+//     their own (no PTU; the trim tank; the A340's four feed tanks and cross-feed valves).
 // Their panels are modules laid out per deck (src/panels.js LAYOUTS: move a module, or give another deck one, there),
 // all working: click them in 3D (src/systems.js, src/aircraft.js and src/radio.js do what they switch; FG.fmgc what
 // the FCU's knobs and buttons ask). The screens go dark without power, show a failed IR's flags and dim with
@@ -32,8 +37,14 @@ import(`./systems.js${V}`).then(() => Promise.all([import(`./aircraft.js${V}`), 
 // ---------- the decks' sizes ----------
 const DECKS = {
   a350: { HALF: 1.36, ROOF: 0.50, REAR: -1.75, FLOOR: -1.32, EYE_X: 0.53, wsY: 1.15, wsK: 0.294, wsZ: 0.767, scr: 1.19 },
-  a320: { HALF: 1.12, ROOF: 0.46, REAR: -1.50, FLOOR: -1.25, EYE_X: 0.50, wsY: 0.98, wsK: 0.33, wsZ: 0.80, scr: 0.98 },
+  a320: { HALF: 1.12, ROOF: 0.46, REAR: -1.50, FLOOR: -1.25, EYE_X: 0.50, wsY: 0.98, wsK: 0.33, wsZ: 0.80, scr: 0.98, six: true },
 };
+// (the A330's and A340's: the A320's panels in a wider, roomier nose; six: the A320 family's six square screens)
+const WIDE = { ...DECKS.a320, HALF: 1.24, ROOF: 0.50, REAR: -1.70, EYE_X: 0.53, wsK: 0.30, scr: 1.04 };
+DECKS.a330 = { ...WIDE };
+DECKS.a330neo = { ...WIDE, oans: true };
+DECKS.a340 = { ...WIDE, crt: true, stby3: true };
+DECKS.a346 = { ...WIDE, taxiCam: true };
 const kindOf = deckOf; // (which deck a type flies with: src/panels.js)
 export const has = (type) => !!kindOf(type);
 // The current deck's numbers (set by build()).
@@ -70,8 +81,9 @@ function mainFace(kind) {
   return (T, b, g, W, H) => {
     b.fillStyle = 'rgba(255,255,255,0.04)';
     for (let x = 0; x < W; x += 64) b.fillRect(x, 0, 1, H);
-    for (const cx of kind === 'a320' ? [200, 824] : [W * 0.27, W * 0.73]) {
-      b.fillStyle = '#2f3339'; for (let i = 0; i < 9; i++) b.fillRect(cx - 30 + i * 7, kind === 'a320' ? 220 : H * 0.84, 3, 22);
+    const six = DECKS[kind] && DECKS[kind].six;
+    for (const cx of six ? [200, 824] : [W * 0.27, W * 0.73]) {
+      b.fillStyle = '#2f3339'; for (let i = 0; i < 9; i++) b.fillRect(cx - 30 + i * 7, six ? 220 : H * 0.84, 3, 22);
     }
   };
 }
@@ -137,7 +149,7 @@ function quad(tl, tr, bl, br, mat) {
 
 function build(kind, nEng) {
   useDeck(kind);
-  const a320 = kind === 'a320';
+  const a320 = !!D.six; // (the A320 family's six square screens: the A320, A330, A340)
   // The windows (2D outlines): the windscreen in its plane (u = |x|, v = z), the side windows in the wall's (u = y, v = z).
   const k = D.scr / 1.19;
   const SCREEN = [[0.075, -0.25], [1.13 * k, -0.25], [1.19 * k, -0.19], [1.19 * k, 0.17], [1.08 * k, 0.27], [0.075, 0.27]];
@@ -328,8 +340,18 @@ function build(kind, nEng) {
     addScreen(0, vS + H + 0.035, W * 0.95, H * 0.95, 'sd');
     isisAt = [-0.235, 0.10]; gearAt = [0.235, 0.12];
   }
-  // the standby instrument and the gear lever
-  {
+  // the standby instrument (the ISIS, or the A340-300's three round ones: the horizon over the airspeed and the
+  // altimeter) and the gear lever
+  if (D.stby3) {
+    const at = new THREE.Vector3(...panelAt(isisAt[0], isisAt[1] + 0.02)), nrm = panelFaceNormal(0);
+    const g = new THREE.Group(); g.up.set(0, 0, 1); g.position.copy(at).addScaledVector(nrm, 0.01); g.lookAt(at.clone().addScaledVector(nrm, 1));
+    g.add(box(0.13, 0.13, 0.02, M.bezel, 0, 0, 0));
+    const cv = canvas(320, 320), tex = texture(cv);
+    const face = new THREE.Mesh(new THREE.PlaneGeometry(0.12, 0.12), new THREE.MeshBasicMaterial({ map: tex, toneMapped: false }));
+    face.position.z = 0.0105; g.add(face);
+    root.add(g);
+    screens.push({ kind: 'stby3', cv, ctx: cv.getContext('2d'), tex });
+  } else {
     const at = new THREE.Vector3(...panelAt(isisAt[0], isisAt[1])), nrm = panelFaceNormal(0);
     const g = new THREE.Group(); g.up.set(0, 0, 1); g.position.copy(at).addScaledVector(nrm, 0.01); g.lookAt(at.clone().addScaledVector(nrm, 1));
     g.add(box(0.095, 0.095, 0.02, M.bezel, 0, 0, 0));
@@ -521,6 +543,253 @@ function isis(c, W, H, st) {
   c.font = '600 20px system-ui, sans-serif';
   c.fillText(String(Math.round((st.h || 0) / 0.3048 / 10) * 10), W * 0.89, H / 2);
 }
+// The A340-300's standby instruments: three round electromechanical ones, the horizon over the airspeed and the
+// altimeter (the ISIS replaced them on the later A330s and A340s).
+function stby3(c, W, H, st) {
+  c.fillStyle = '#101214'; c.fillRect(0, 0, W, H);
+  const dial = (x, y, r) => {
+    c.fillStyle = '#2a2d31'; c.beginPath(); c.arc(x, y, r + 5, 0, 7); c.fill();
+    c.fillStyle = '#060708'; c.beginPath(); c.arc(x, y, r, 0, 7); c.fill();
+  };
+  const ticks = (x, y, r, n, every, label) => {
+    c.strokeStyle = '#e8eef8'; c.fillStyle = '#e8eef8'; c.font = `600 ${Math.round(r * 0.2)}px system-ui, sans-serif`; c.textAlign = 'center'; c.textBaseline = 'middle';
+    for (let k = 0; k < n; k++) {
+      const a = (k / n) * Math.PI * 2 - Math.PI / 2, big = k % every === 0;
+      c.lineWidth = big ? 2.5 : 1.2;
+      c.beginPath(); c.moveTo(x + Math.cos(a) * r * (big ? 0.8 : 0.88), y + Math.sin(a) * r * (big ? 0.8 : 0.88)); c.lineTo(x + Math.cos(a) * r * 0.97, y + Math.sin(a) * r * 0.97); c.stroke();
+      if (big && label) c.fillText(label(k / every), x + Math.cos(a) * r * 0.64, y + Math.sin(a) * r * 0.64);
+    }
+  };
+  const needle = (x, y, r, a, w = 3, col = '#f4f6f8') => { c.strokeStyle = col; c.lineWidth = w; c.beginPath(); c.moveTo(x, y); c.lineTo(x + Math.cos(a - Math.PI / 2) * r, y + Math.sin(a - Math.PI / 2) * r); c.stroke(); };
+  // the horizon
+  const hx = W / 2, hy = H * 0.29, hr = W * 0.24;
+  dial(hx, hy, hr);
+  c.save(); c.beginPath(); c.arc(hx, hy, hr, 0, 7); c.clip();
+  c.translate(hx, hy); c.rotate(-(st.phi || 0) * Math.PI / 180);
+  const py = (st.theta || 0) * hr / 25;
+  c.fillStyle = '#2b6fb6'; c.fillRect(-hr, -2 * hr + py, 2 * hr, 2 * hr);
+  c.fillStyle = '#5a3a1e'; c.fillRect(-hr, py, 2 * hr, 2 * hr);
+  c.strokeStyle = '#fff'; c.lineWidth = 2; c.beginPath(); c.moveTo(-hr, py); c.lineTo(hr, py); c.stroke();
+  for (const d of [-10, 10, 20]) { const y = py - d * hr / 25; c.beginPath(); c.moveTo(-hr * 0.2, y); c.lineTo(hr * 0.2, y); c.stroke(); }
+  c.restore();
+  c.strokeStyle = '#ffb000'; c.lineWidth = 5; c.beginPath(); c.moveTo(hx - hr * 0.6, hy); c.lineTo(hx - hr * 0.18, hy); c.moveTo(hx + hr * 0.18, hy); c.lineTo(hx + hr * 0.6, hy); c.stroke();
+  c.fillStyle = '#ffb000'; c.beginPath(); c.arc(hx, hy, 4, 0, 7); c.fill();
+  // the airspeed (knots: 60 at the top … 400 round once)
+  const kt = (st.V || 0) / 0.514444, ax = W * 0.26, ay = H * 0.76, ar = W * 0.2;
+  dial(ax, ay, ar); ticks(ax, ay, ar, 34, 2, (k) => (k % 2 ? '' : String(60 + k * 20)));
+  needle(ax, ay, ar * 0.85, (Math.max(60, Math.min(400, kt)) - 60) / 340 * Math.PI * 2);
+  c.fillStyle = '#9aa1aa'; c.font = '600 11px system-ui, sans-serif'; c.fillText('KNOTS', ax, ay + ar * 0.42);
+  // the altimeter (one turn a thousand feet, the thousands in a window)
+  const ft = (st.h || 0) / 0.3048, lx = W * 0.74, ly = H * 0.76, lr = W * 0.2;
+  dial(lx, ly, lr); ticks(lx, ly, lr, 50, 5, (k) => String(k));
+  c.fillStyle = '#000'; c.fillRect(lx - lr * 0.42, ly + lr * 0.2, lr * 0.84, lr * 0.3);
+  c.fillStyle = '#e8eef8'; c.font = `600 ${Math.round(lr * 0.24)}px ui-monospace, monospace`; c.fillText(String(Math.floor(Math.max(0, ft) / 1000)).padStart(2, '0'), lx, ly + lr * 0.36);
+  needle(lx, ly, lr * 0.85, ((((ft % 1000) + 1000) % 1000) / 1000) * Math.PI * 2);
+  c.fillStyle = '#9aa1aa'; c.font = '600 11px system-ui, sans-serif'; c.fillText('ALT', lx, ly - lr * 0.4);
+}
+// A CRT screen's look (the A340-300's): its scan lines, the corners darker, the glass's own glow.
+function crtLook(c, W, H) {
+  c.save();
+  c.fillStyle = 'rgba(0,0,0,0.18)';
+  for (let y = 0; y < H; y += 3) c.fillRect(0, y, W, 1);
+  const g = c.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.3, W / 2, H / 2, Math.max(W, H) * 0.74);
+  g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(1, 'rgba(0,0,0,0.5)');
+  c.fillStyle = g; c.fillRect(0, 0, W, H);
+  c.globalCompositeOperation = 'lighter';
+  c.fillStyle = 'rgba(16,26,34,0.5)'; c.fillRect(0, 0, W, H);
+  c.restore();
+}
+
+// ---------- the airport round the aircraft: the taxi camera's picture and the airport map (OANS) ----------
+// The nearest airport's real layout (the game's FG.layouts: aprons, taxiways, stands, buildings) and runways, in
+// metres ahead (y) and right (x) of the aircraft.
+let groundAt = 0, groundNow = null;
+function groundOf(P) {
+  const s = P.state, G = FG.game, now = performance.now();
+  if (now - groundAt < 2000) return groundNow;
+  groundAt = now; groundNow = null;
+  if (!G || !G.airportByCode) return null;
+  let best = null, bd = 1e9;
+  for (const a of Object.values(G.airportByCode)) {
+    if (Math.abs(a.lat - s.lat) > 0.12 || Math.abs(a.lon - s.lon) > 0.2) continue;
+    const d = G.distanceKm({ lat: s.lat, lon: s.lon }, a);
+    if (d < bd) { bd = d; best = a; }
+  }
+  if (!best || bd > 10) return null;
+  groundNow = { code: best.code, lay: FG.layouts ? FG.layouts.get(best.code) : null, rws: G.airportRunways(best.code) || [] };
+  return groundNow;
+}
+// (lat, lon) → [x right, y ahead] metres from the aircraft
+function localXY(s) {
+  const cosL = Math.cos(s.lat * Math.PI / 180), ps = (s.psi || 0) * Math.PI / 180, cp = Math.cos(ps), sp = Math.sin(ps);
+  return (lat, lon) => { const e = (lon - s.lon) * 111320 * cosL, n = (lat - s.lat) * 111320; return [e * cp - n * sp, n * cp + e * sp]; };
+}
+// a polyline's pavement as quads either side of it (w metres wide)
+function stripes(pts, w) {
+  const out = [];
+  for (let i = 1; i < pts.length; i++) {
+    const [x0, y0] = pts[i - 1], [x1, y1] = pts[i], l = Math.hypot(x1 - x0, y1 - y0) || 1, nx = (-(y1 - y0) / l) * w / 2, ny = ((x1 - x0) / l) * w / 2;
+    out.push([[x0 + nx, y0 + ny], [x1 + nx, y1 + ny], [x1 - nx, y1 - ny], [x0 - nx, y0 - ny]]);
+  }
+  return out;
+}
+// The aircraft's own measures: length, span, fuselage diameter; the nose gear and the main gear (y ahead of its middle).
+function bodyOf(P) {
+  const s = P.state, look = (FG.data && FG.data.looks && FG.data.looks[s.type]) || {};
+  const len = look.len || 60, span = look.span || 60, dia = look.dia || 5.6, wb = (s.spec && s.spec.wheelbase) || len * 0.45;
+  const noseGear = len / 2 - 0.075 * len;
+  return { len, span, dia, nose: len / 2, noseGear, main: noseGear - wb, track: Math.min(12, span * 0.17) };
+}
+// The ground (aprons, runways, taxiways with their centre lines) through a drawing function's project(x, y, z).
+function drawGround(c, P, project, { plan = false, near = 0.3 } = {}) {
+  const g = groundOf(P), s = P.state;
+  if (!g) return null;
+  const xy = localXY(s);
+  // a polygon on the ground (z = 0) cut at the camera's near plane, then filled
+  const poly = (pts, fill, stroke, lw = 1) => {
+    const q = project.clip ? project.clip(pts.map(([x, y]) => [x, y, 0]), near) : pts.map(([x, y]) => [x, y, 0]);
+    if (q.length < 2) return;
+    c.beginPath();
+    q.forEach((p, i) => { const [u, v] = project(p); if (i) c.lineTo(u, v); else c.moveTo(u, v); });
+    if (fill) { c.closePath(); c.fillStyle = fill; c.fill(); }
+    if (stroke) { c.strokeStyle = stroke; c.lineWidth = lw; c.stroke(); }
+  };
+  const line = (pts, col, lw, dash) => {
+    c.setLineDash(dash || []);
+    for (let i = 1; i < pts.length; i++) {
+      const q = project.clip ? project.clip([[...pts[i - 1], 0], [...pts[i], 0]], near, true) : [[...pts[i - 1], 0], [...pts[i], 0]];
+      if (q.length < 2) continue;
+      const [a, b] = [project(q[0]), project(q[1])];
+      c.strokeStyle = col; c.lineWidth = lw; c.beginPath(); c.moveTo(a[0], a[1]); c.lineTo(b[0], b[1]); c.stroke();
+    }
+    c.setLineDash([]);
+  };
+  // (in reach: a side of it passes within `far` of the aircraft; a runway's ends can both be kilometres away)
+  const far = plan ? 12000 : 900;
+  const segNear = ([x0, y0], [x1, y1]) => {
+    const dx = x1 - x0, dy = y1 - y0, t = Math.max(0, Math.min(1, -(x0 * dx + y0 * dy) / (dx * dx + dy * dy || 1)));
+    return Math.hypot(x0 + dx * t, y0 + dy * t) < far;
+  };
+  const inReach = (pts) => pts.some((p, i) => (i ? segNear(pts[i - 1], p) : pts.length === 1 && Math.hypot(p[0], p[1]) < far));
+  const L = g.lay;
+  if (L) {
+    for (const r of L.aprons || []) { const p = r.map(([la, lo]) => xy(la, lo)); if (inReach(p)) poly(p, '#3b4047'); }
+    for (const w of L.taxiways || []) { const p = w.map(([la, lo]) => xy(la, lo)); if (inReach(p)) for (const q of stripes(p, 23)) poly(q, '#454a52'); }
+  }
+  for (const r of g.rws) {
+    const a = xy(r[0], r[1]), b = xy(r[2], r[3]);
+    if (!inReach([a, b])) continue;
+    for (const q of stripes([a, b], r[4] || 45)) poly(q, '#55595f', '#d8dde3', plan ? 1 : 1.5);
+    line([a, b], '#f2f4f6', plan ? 1.5 : 2, plan ? [8, 8] : [14, 10]);
+  }
+  if (L) {
+    for (const w of L.taxiways || []) { const p = w.map(([la, lo]) => xy(la, lo)); if (inReach(p)) line(p, '#e8c547', plan ? 1.5 : 2.5); }
+    if (plan) {
+      for (const r of L.terminals || []) { const p = r.map(([la, lo]) => xy(la, lo)); if (inReach(p)) poly(p, '#3e6f8f', '#7fb0cf', 1); }
+      for (const r of L.hangars || []) { const p = r.map(([la, lo]) => xy(la, lo)); if (inReach(p)) poly(p, '#3a5566', '#6d8fa3', 1); }
+    }
+  }
+  return g;
+}
+// The A340-600's TAXI CAMERA on the SD: the fin camera looking ahead over the fuselage (the nose and the main gear's
+// wheels marked over the ground), and the camera under the fuselage looking down at the nose wheel.
+function taxiCamScreen(c, W, H, P) {
+  const B = bodyOf(P);
+  c.fillStyle = '#05070a'; c.fillRect(0, 0, W, H);
+  const pane = (x0, y0, w, h, cam, pitchDeg, fovDeg, parts, title) => {
+    c.save(); c.beginPath(); c.rect(x0, y0, w, h); c.clip();
+    c.fillStyle = '#26302a'; c.fillRect(x0, y0, w, h); // (grass)
+    const a = pitchDeg * Math.PI / 180, ca = Math.cos(a), sa = Math.sin(a), f = (h / 2) / Math.tan(fovDeg * Math.PI / 360);
+    const depth = (p) => (p[1] - cam[1]) * ca - (p[2] - cam[2]) * sa;
+    const project = (p) => {
+      const dx = p[0] - cam[0], dy = p[1] - cam[1], dz = p[2] - cam[2];
+      const zc = Math.max(0.05, dy * ca - dz * sa), up = dy * sa + dz * ca;
+      return [x0 + w / 2 + (dx / zc) * f, y0 + h / 2 - (up / zc) * f];
+    };
+    // (Sutherland–Hodgman against the near plane; `open`: a line, not a polygon)
+    project.clip = (pts, near, open) => {
+      const out = [], n = pts.length;
+      for (let i = 0; i < (open ? n - 1 : n); i++) {
+        const p = pts[i], q = pts[(i + 1) % n], dp = depth(p) - near, dq = depth(q) - near;
+        if (dp >= 0 && (open ? i === 0 : true)) out.push(p);
+        if ((dp >= 0) !== (dq >= 0)) { const t = dp / (dp - dq); out.push([p[0] + (q[0] - p[0]) * t, p[1] + (q[1] - p[1]) * t, p[2] + (q[2] - p[2]) * t]); }
+        if (open && dq >= 0) out.push(q);
+      }
+      return out;
+    };
+    drawGround(c, P, project, { near: 0.5 });
+    const shape = (pts, fill, stroke) => {
+      const q = project.clip(pts, 0.5);
+      if (q.length < 3) return;
+      c.beginPath(); q.forEach((p, i) => { const [u, v] = project(p); if (i) c.lineTo(u, v); else c.moveTo(u, v); }); c.closePath();
+      if (fill) { c.fillStyle = fill; c.fill(); }
+      if (stroke) { c.strokeStyle = stroke; c.lineWidth = 2; c.stroke(); }
+    };
+    parts(shape, project);
+    c.restore();
+    c.fillStyle = '#e8eef8'; c.font = `600 ${Math.round(H * 0.035)}px system-ui, sans-serif`; c.textAlign = 'left'; c.textBaseline = 'top';
+    c.fillText(title, x0 + 8, y0 + 6);
+    c.strokeStyle = '#6d7480'; c.lineWidth = 2; c.strokeRect(x0 + 1, y0 + 1, w - 2, h - 2);
+  };
+  const r = B.dia / 2, zc = 0.9 + r; // (the fuselage's centre: its belly about 0.9 m up)
+  // the fin camera: ahead and down over the fuselage
+  pane(0, 0, W, H * 0.6, [0, -B.len * 0.36, zc + r + 7.5], 19, 54, (shape, project) => {
+    const y0 = -B.len * 0.36 + 4;
+    shape([[-r * 0.8, y0, zc + r], [r * 0.8, y0, zc + r], [r * 0.7, B.nose - 6, zc + r * 0.8], [0, B.nose, zc], [-r * 0.7, B.nose - 6, zc + r * 0.8]], '#d9dde2', '#9aa1aa');
+    for (const sd of [-1, 1]) {
+      const wy = B.main + 8;
+      shape([[sd * r, wy, zc - 0.6], [sd * B.span / 2, wy - B.span * 0.33, zc + 0.8], [sd * B.span / 2, wy - B.span * 0.33 - 3, zc + 0.8], [sd * r, wy - 13, zc - 0.6]], '#c4c9cf', '#8d949c');
+    }
+    // the guides: the nose wheel and the main gear's outer wheels, projected to the ground (cyan) and where the nose is
+    c.strokeStyle = '#4fd6ff'; c.lineWidth = 2;
+    for (const x of [-B.track / 2 - 0.7, B.track / 2 + 0.7]) {
+      const a = project([x, B.main, 0]), b = project([x, B.main + 60, 0]);
+      c.setLineDash([6, 6]); c.beginPath(); c.moveTo(a[0], a[1]); c.lineTo(b[0], b[1]); c.stroke(); c.setLineDash([]);
+    }
+    const n = project([0, B.noseGear, 0]);
+    c.fillStyle = '#4fd6ff'; c.beginPath(); c.arc(n[0], n[1], 5, 0, 7); c.fill();
+  }, 'FIN CAMERA');
+  // under the fuselage, behind the nose gear, looking down at it
+  pane(0, H * 0.6, W, H * 0.4, [0, B.noseGear - 4.5, 1.9], 40, 62, (shape) => {
+    for (const x of [-0.45, 0.45]) shape([[x - 0.2, B.noseGear - 0.6, 0.02], [x + 0.2, B.noseGear - 0.6, 0.02], [x + 0.2, B.noseGear + 0.6, 0.02], [x - 0.2, B.noseGear + 0.6, 0.02]], '#111315', '#555b62');
+    shape([[-0.08, B.noseGear - 0.5, 1.3], [0.08, B.noseGear - 0.5, 1.3], [0.08, B.noseGear + 0.2, 0.4], [-0.08, B.noseGear + 0.2, 0.4]], '#9aa1aa');
+  }, 'NOSE GEAR');
+  if (!groundOf(P)) { c.fillStyle = '#ffb000'; c.textAlign = 'center'; c.fillText('NO AIRPORT DATA', W / 2, H * 0.3); }
+}
+// The A330neo's airport map (OANS) on the ND: the stands, taxiways, runways and buildings round you, heading up.
+function oansScreen(c, W, H, P, side) {
+  const s = P.state, sys = SYS(), X = sys && sys.S.misc;
+  const range = (X && X.oansRange) || 1, cx = W / 2, cy = H * 0.66, ppm = (H * 0.56) / (range * 1852);
+  c.fillStyle = '#05070a'; c.fillRect(0, 0, W, H);
+  c.save(); c.beginPath(); c.rect(0, H * 0.08, W, H * 0.86); c.clip();
+  const project = ([x, y]) => [cx + x * ppm, cy - y * ppm];
+  const g = drawGround(c, P, project, { plan: true });
+  if (g && g.lay && range <= 2) {
+    const xy = localXY(s);
+    c.fillStyle = '#ff4fd8'; c.font = `600 ${Math.round(H * 0.026)}px system-ui, sans-serif`; c.textAlign = 'center'; c.textBaseline = 'middle';
+    for (const st of g.lay.stands || []) {
+      const [x, y] = xy(st[0], st[1]);
+      if (Math.abs(x) * ppm > W || Math.abs(y) * ppm > H) continue;
+      const [u, v] = project([x, y]);
+      c.fillRect(u - 2, v - 2, 4, 4);
+      if (st[3] && range <= 1) c.fillText(st[3], u, v - H * 0.02);
+    }
+  }
+  c.restore();
+  // you: the yellow aircraft symbol at its size
+  const B = bodyOf(P), k = Math.max(1, B.len * ppm / 2);
+  c.strokeStyle = '#ffd60a'; c.lineWidth = 3;
+  c.beginPath(); c.moveTo(cx, cy - k); c.lineTo(cx, cy + k); c.moveTo(cx - Math.max(6, B.span * ppm / 2), cy); c.lineTo(cx + Math.max(6, B.span * ppm / 2), cy);
+  c.moveTo(cx - k * 0.35, cy + k * 0.85); c.lineTo(cx + k * 0.35, cy + k * 0.85); c.stroke();
+  c.fillStyle = '#e8eef8'; c.font = `600 ${Math.round(H * 0.04)}px system-ui, sans-serif`; c.textAlign = 'left'; c.textBaseline = 'middle';
+  c.fillText(`OANS ${g ? g.code : '----'}`, W * 0.03, H * 0.04);
+  c.fillStyle = '#30d158'; c.fillText(`GS ${Math.round((s.gsMs != null ? s.gsMs : s.V) / 0.514444)}`, W * 0.03, H * 0.97);
+  c.textAlign = 'right'; c.fillStyle = '#4fd6ff'; c.fillText(`${range} NM`, W * 0.97, H * 0.97);
+  c.fillStyle = '#e8eef8'; c.fillText(`HDG ${String(Math.round(((s.psi || 0) % 360 + 360) % 360)).padStart(3, '0')}`, W * 0.97, H * 0.04);
+  if (!g) { c.textAlign = 'center'; c.fillStyle = '#ffb000'; c.fillText('ARPT NOT IN DATABASE', W / 2, H * 0.4); }
+  void side;
+}
+
 // The information system: a page of the flight's papers (departure, runway, weights, the checklist).
 function ois(c, W, H, st, side) {
   c.fillStyle = '#0b1016'; c.fillRect(0, 0, W, H);
@@ -559,6 +828,7 @@ function pfdScreen(c, W, H, P) {
 }
 // The ND: the FMGC's (flight plan, modes, ranges) when it is on, else the plain one.
 function ndScreen(c, W, H, P, side = 0) {
+  { const x = SYS(); if (D.oans && x && x.S.misc && x.S.misc.oans) { oansScreen(c, W, H, P, side); return; } }
   const M = FM();
   if (!M) { P.panel(c, 'nd', W, H); return; }
   c.fillStyle = '#000'; c.fillRect(0, 0, W, H);
@@ -623,6 +893,7 @@ function ewdScreen(c, W, H, P) {
 // ground; else the WHEEL page.
 function sdScreen(c, W, H, P) {
   const s = P.state, sys = SYS();
+  if (D.taxiCam && sys && sys.S.misc && sys.S.misc.taxiCam && s.onGround) { taxiCamScreen(c, W, H, P); return; }
   // the page: the ECAM control panel's, or the one the systems call up (src/aircraft.js sdPage)
   const pg = sys && sys.sdPage ? sys.sdPage() : sys && sys.S.eng.some((e) => e.fire || e.start || !e.run) ? 'ENG' : sys && (sys.S.apu.n > 1 || sys.S.apu.fire) ? 'APU' : 'WHEEL';
   const engPage = pg === 'ENG', apuPage = pg === 'APU';
@@ -668,7 +939,7 @@ function sdScreen(c, W, H, P) {
 }
 
 // After a screen is drawn: dark without power, the failure flags of a pilot's IR (src/aircraft.js), its brightness.
-const SCREEN_IDS = { pfd: ['pfd'], nd: ['nd'], 'pfdnd-c': ['pfd', 'nd'], 'pfdnd-f': ['pfd', 'nd'], ewd: ['ewd'], sd: ['sd'], isis: ['isis'], ois: ['sd'], 'ois-f': ['sd'] };
+const SCREEN_IDS = { stby3: ['isis'], pfd: ['pfd'], nd: ['nd'], 'pfdnd-c': ['pfd', 'nd'], 'pfdnd-f': ['pfd', 'nd'], ewd: ['ewd'], sd: ['sd'], isis: ['isis'], ois: ['sd'], 'ois-f': ['sd'] };
 function finish(c, W, H, sc) {
   const sys = SYS();
   if (!sys || !sys.screenOn) return;
@@ -714,8 +985,10 @@ function paintScreens(now, P) {
     else if (sc.kind === 'ewd') ewdScreen(c, W, H, P);
     else if (sc.kind === 'sd') sdScreen(c, W, H, P);
     else if (sc.kind === 'isis') isis(c, W, H, info);
+    else if (sc.kind === 'stby3') stby3(c, W, H, info);
     else ois(c, W, H, info, sc.kind === 'ois-f');
     finish(c, W, H, sc);
+    if (D.crt && sc.kind !== 'stby3') crtLook(c, W, H);
     sc.tex.needsUpdate = true;
   }
 }

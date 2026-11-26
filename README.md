@@ -29,7 +29,7 @@ To send the game's ✈ Fly button to a local copy, run this once in the game's p
 
 It opens by itself, and again when you leave a flight. Pick:
 
-- **Aircraft** from a gallery of all sixteen, pictured in the livery you chose. Filter by Airbus, Boeing, Propellers,
+- **Aircraft** from a gallery of all eighteen, pictured in the livery you chose. Filter by Airbus, Boeing, Propellers,
   or Concorde & business, or search. Each card says how many engines it has, whether it is fly-by-wire, whether the
   autopilot works in it, and whether it has a 3D cockpit (the A350s).
 - **Airport**: type a code, city or name (suggestions as you type), or click one on the small map. Its runways are
@@ -50,10 +50,11 @@ The last choices are kept for next time (localStorage `flightgame.fly.pick`). Th
 
 ## Flying by hand
 
-Sixteen aircraft, each flying in its own way:
-- **A350-900, A350-1000, A320, A330-300, A340-300, A340-600, A380-800, Global 7500**: fly-by-wire with full
+Eighteen aircraft, each flying in its own way:
+- **A350-900, A350-1000, A320, A330-200, A330-300, A330-900neo, A340-300, A340-600, A380-800, Global 7500**: fly-by-wire with full
   protections (below; the Global's is Bombardier's "normal mode"). The A320 is light and nimble, the A350-1000
-  heavy, with a tail that strikes at under 10°. The A340-300's four small CFM56s spool up slowly and climb the
+  heavy, with a tail that strikes at under 10°. The short A330-200 climbs better than the -300 and clears its tail
+  to 12°; the A330-900neo's longer wing lands slower. The A340-300's four small CFM56s spool up slowly and climb the
   slowest of all; the 75 m A340-600 strikes its tail past 9°; the 560 t A380 rolls slowly and only its inner engines
   reverse. The Global 7500 is a light business jet with plenty of thrust: quick to roll, Mach 0.90.
 - **Boeing 737-800, 747-400, 777-300ER**: conventional controls, as a real aircraft. The stick moves the elevator;
@@ -171,6 +172,26 @@ by hand.
 In the cockpit camera (C) the Airbuses have a 3D flight deck: the A350s and the A380 the A350's, the A320, A330
 and A340 the A320 family's (six square screens: FMA + PFD, ND, the E/WD over the SD, ND, PFD; the MCDUs on the
 pedestal). Drag to look round; look up and to the right for the overhead panel.
+
+The A330s and A340s sit in a wider nose, with the same panel modules (`src/panels.js` LAYOUTS) and each version's
+own, as built:
+
+| Deck | Types | What it has of its own |
+|---|---|---|
+| `a330` | A330-200, A330-300 | The enhanced A330: LCD screens and the ISIS. |
+| `a330neo` | A330-900neo | Its EIS2: the trackball (CURSOR CTL) on the pedestal with OANS, the airport map on both NDs (stands, taxiways, runways, buildings; 0.5 to 5 NM). |
+| `a340` | A340-300 | CRT screens and the three round standby instruments (horizon, airspeed, altimeter). |
+| `a346` | A340-600 | LCDs, the ISIS and the TAXI CAMERA button: the fin camera's and the nose-gear camera's picture on the SD on the ground, with the main gear's and the nose wheel's guides over the taxiway (75 m long: the main gear runs 33 m behind you). |
+
+Their overhead HYD and FUEL panels are their own:
+
+- **HYD (no PTU):** an engine-driven pump per system and engine, and an electric pump and the RAT on green.
+  - A330: green and blue on engine 1, green and yellow on engine 2.
+  - A340: green on engines 1 and 4, blue on 2, yellow on 3.
+- **FUEL:** a trim tank in the tail, whose fuel goes forward in the cruise (T TK FEED: AUTO, or ISOL to keep it).
+  - A330: a standby pump in each wing.
+  - A340: a feed tank per engine, with a main and a standby pump and its own X FEED valve. Open two valves and one
+    engine's pumps feed the other.
 
 **Click the controls in 3D:**
 

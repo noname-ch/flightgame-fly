@@ -175,6 +175,12 @@ const step = (s) => console.log(`· ${s}`);
 
 // ---------- the test ----------
 const SHOTS = process.env.SHOTS;
+// a screen of the 3D deck on its own (its canvas), into SHOTS
+async function screenShot(kind, name) {
+  if (!SHOTS) return;
+  const url = await evaluate((kind) => FG.cockpit3d.pit.screens.find((x) => x.kind === kind).cv.toDataURL('image/png'), kind);
+  fs.writeFileSync(path.join(SHOTS, `${name}.png`), Buffer.from(url.split(',')[1], 'base64'));
+}
 async function shot(name) {
   if (!SHOTS) return;
   await sleep(600);
@@ -439,8 +445,9 @@ try {
   if ((await S()).lt.nav !== 0) errors.push('back to the checkpoint, NAV & LOGO did not come back to OFF');
   await evaluate(() => FG.pilot.stop());
 
-  step('the A350 and A340 decks build too (four engines: four masters, four FIRE blocks)');
-  for (const type of ['A340-600', 'A350-900']) {
+  step('the A350, A330 and A340 decks build too, each version its own (four engines: four masters, four FIRE blocks)');
+  const DECK = { 'A350-900': 'a350', 'A330-200': 'a330', 'A330-900': 'a330neo', 'A340-300': 'a340', 'A340-600': 'a346' };
+  for (const type of Object.keys(DECK)) {
     await evaluate((type) => {
       const r = G.airportRunways('ZRH')[0];
       const course = G.bearing({ lat: r[0], lon: r[1] }, { lat: r[2], lon: r[3] });
@@ -448,10 +455,70 @@ try {
     }, type);
     await waitFor(() => FG.pilot.active && !FG.pilot.state.loading, 20000, `the ${type} to be ready`);
     await evaluate(() => { FG.pilot.state.cam = 'cockpit'; FG.view3d.pilotCam('cockpit'); });
-    const want = type === 'A340-600' ? 'a3204' : 'a3502';
+    const n4 = /^A34/.test(type), want = DECK[type] + (n4 ? 4 : 2);
     await waitFor((want) => FG.cockpit3d.pit && FG.cockpit3d.pit.kind + FG.cockpit3d.pit.nEng === want, 20000, `the ${type}'s deck`, want);
-    const n = await evaluate(() => FG.cockpit3d.pit.panels[3].controls.filter((c) => c.tip && /FIRE pushbutton: push/.test(c.tip)).length);
-    if (n !== (type === 'A340-600' ? 5 : 3)) errors.push(`${type}: ${n} FIRE pushbuttons`);
+    const d = await evaluate(() => {
+      const pit = FG.cockpit3d.pit, mods = (k) => pit.panels[k].items.map((it) => it.name);
+      return { fire: pit.panels[3].controls.filter((c) => c.tip && /FIRE pushbutton: push/.test(c.tip)).length, screens: pit.screens.map((x) => x.kind),
+        ovh: mods(3), main: mods(1), ped: mods(2) };
+    });
+    if (d.fire !== (n4 ? 5 : 3)) errors.push(`${type}: ${d.fire} FIRE pushbuttons`);
+    if (/^A3[34]/.test(type)) {
+      if (!d.ovh.includes('hydW') || d.ovh.includes('hyd')) errors.push(`${type}: overhead HYD ${d.ovh.join(',')}`);
+      if (!d.ovh.includes(n4 ? 'fuel340' : 'fuel330')) errors.push(`${type}: overhead FUEL ${d.ovh.join(',')}`);
+      if (d.screens.includes('stby3') !== (type === 'A340-300')) errors.push(`${type}: standby instruments ${d.screens.join(',')}`);
+      if (d.main.includes('taxiCam') !== (type === 'A340-600')) errors.push(`${type}: TAXI CAMERA ${d.main.join(',')}`);
+      if (d.ped.includes('oans') !== (type === 'A330-900')) errors.push(`${type}: OANS ${d.ped.join(',')}`);
+      // the hydraulics without a PTU: green from its engine pumps; both off, it goes; its electric pump brings it back
+      const hyd = await evaluate(async (n4) => {
+        const y = FG.systems, out = [], H = y.S.hyd, step = (k) => { for (let j = 0; j < k; j++) y.step(0.5); };
+        if (H.ptu) out.push('a PTU');
+        for (const e of n4 ? ['G0', 'G3'] : ['G0', 'G1']) y.set('edp', e);
+        step(40);
+        if (H.p.G > 1450) out.push(`green still ${Math.round(H.p.G)} psi with its engine pumps off`);
+        if (H.p.B < 1450 || H.p.Y < 1450) out.push(`blue or yellow lost too (${JSON.stringify({ p: H.p, edp: H.edp, plan: H.plan, eng: y.S.eng.map((e) => [e.run, Math.round(e.n1), e.master]), elec: y.S.elec.level })})`);
+        y.set('elecPump', 'G'); step(20);
+        if (H.p.G < 2500) out.push(`green ELEC PUMP gave ${Math.round(H.p.G)} psi`);
+        for (const e of n4 ? ['G0', 'G3'] : ['G0', 'G1']) y.set('edp', e);
+        y.set('elecPump', 'G');
+        // the trim tank and the A340's own cross-feed
+        const F = y.S.fuel;
+        if (!(F.T > 0)) out.push('no fuel in the trim tank');
+        if (n4) {
+          // (up high, no gravity feed) engine 1's pumps off: it starves; X FEED 1 and 2 open: engine 2's pumps feed it
+          const s = FG.pilot.state, h0 = s.h, g0 = s.onGround;
+          s.onGround = false; s.h = 10000;
+          y.set('fuelPump', 0, 'CL'); y.set('fuelPump', 0, 'CR');
+          y.set('fuelPump', 0, 'E0'); y.set('fuelPump', 0, 'E0S'); step(4);
+          if (!(F.starve[0] > 1)) out.push('engine 1 fed with its pumps off up high');
+          y.set('xfeedE', 1, 0); y.set('xfeedE', 1, 1); step(2);
+          if (F.starve[0] > 0) out.push('X FEED 1+2 did not feed engine 1');
+          y.set('fuelPump', 1, 'E0'); y.set('fuelPump', 1, 'E0S'); y.set('xfeedE', 0, 0); y.set('xfeedE', 0, 1);
+          y.set('fuelPump', 1, 'CL'); y.set('fuelPump', 1, 'CR');
+          s.h = h0; s.onGround = g0; F.starve.fill(0);
+        }
+        return out;
+      }, n4);
+      if (hyd.length) errors.push(`${type} systems: ${hyd.join('; ')}`);
+      if (type === 'A340-600') {
+        await evaluate(() => FG.systems.set('taxiCam', 1));
+        await sleep(1500);
+        const cam = await evaluate(() => { const sc = FG.cockpit3d.pit.screens.find((x) => x.kind === 'sd'); const d = sc.ctx.getImageData(0, 0, sc.cv.width, Math.round(sc.cv.height * 0.6)).data; let n = 0, w = 0; for (let i = 0; i < d.length; i += 4) { if (d[i] > 200 && d[i + 1] > 200 && d[i + 2] > 200) w++; if (d[i] > 180 && d[i + 1] > 150 && d[i + 2] < 120) n++; } return { white: w, yellow: n }; });
+        if (cam.white < 500) errors.push(`TAXI CAMERA: no fuselage on the SD (${JSON.stringify(cam)})`);
+        await screenShot('sd', 'A340-600-taxicam-sd'); await look(0, -32); await shot('A340-600-taxicam'); await look(0, 0);
+        await evaluate(() => FG.systems.set('taxiCam', 0));
+      }
+      if (type === 'A330-900') {
+        await evaluate(() => FG.systems.set('oans', 1));
+        await sleep(2500);
+        const map = await evaluate(() => { const sc = FG.cockpit3d.pit.screens.find((x) => x.kind === 'nd'); const d = sc.ctx.getImageData(0, 0, sc.cv.width, sc.cv.height).data; let n = 0; for (let i = 0; i < d.length; i += 4) if (d[i] > 180 && d[i + 1] > 150 && d[i + 2] < 120) n++; return n; });
+        if (map < 200) errors.push(`OANS: no taxiways on the ND (${map} yellow pixels)`);
+        await screenShot('nd', 'A330-900-oans-nd'); await look(-18, -22); await shot('A330-900-oans'); await look(0, 0);
+        await evaluate(() => FG.systems.set('oans', 0));
+      }
+    }
+    if (type === 'A340-300') await screenShot('stby3', 'A340-300-standby');
+    await shot(`${type}-ahead`);
     await look(60, 60); await shot(`${type}-overhead`); await look(0, 0);
     await evaluate(() => FG.pilot.stop());
   }
