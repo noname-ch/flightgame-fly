@@ -2,7 +2,7 @@
 // (TYPES), each flying in its own way: Airbus fly-by-wire, conventional (Boeing, Bombardier, Concorde, turboprops) or classic
 // (DC-3, Ju 52); jets, Concorde's reheat, turboprops and pistons; their own flaps, weights and limits.
 // The A350's physics are a point-mass model with Airbus-like fly-by-wire (normal law): the stick asks for a pitch rate and
-// holds the flight path when let go, the roll keys ask for a roll rate and the bank stays where it is left (up to 33°),
+// holds the flight path when let go, the roll keys ask for a roll rate and the bank stays where it is left (no limit: the g a steep turn takes is what counts),
 // the angle of attack is limited so the wing never stalls (alpha protection, alpha floor gives TOGA). The engines spool
 // up slowly from idle; flaps and gear take seconds to move and add drag; wheel brakes, ground spoilers and reversers
 // stop it on the runway. Touchdowns are rated by their sink rate; too hard, gear up or a wing tip down is a crash.
@@ -27,7 +27,7 @@
   // ---------- the aircraft ----------
   // Each type flies in its own way: its control law, engines, flaps, weights and limits.
   //   law: 'airbus'  fly-by-wire normal law: the stick asks for a pitch rate and the path is held when let go,
-  //                  bank holds up to 33°, alpha protection and alpha floor, high speed protection;
+  //                  bank holds where it is left (no bank limit), alpha protection and alpha floor, high speed protection;
   //        'conventional'  (Boeing, Concorde, turboprops) the stick moves the elevator, let go it springs back to
   //                  the trim (speed stable: more thrust makes it climb); no hard protections: it stalls
   //                  (stick shaker first), overspeed only warns;
@@ -782,7 +782,7 @@
     if (!s.onGround) {
       const Vs = Math.max(30, V);
       const cg = Math.cos(s.gamma), cphi = Math.cos(s.phi * DEG);
-      const cphiL = Math.max(0.5, cphi);
+      const cphiL = Math.max(0.4, cphi); // (the law holds the path in a turn up to 2.5 g, about 66° of bank; steeper it sinks)
       const Ty = T * Math.sin(s.alpha * DEG);
       const alphaFor = (nz) => ((nz * W - Ty) / Math.max(1, q * sp.S) + 0.45 * spoil - clBase) / CL_A;
       if (airbus()) airbusLaw(dt, alphaFor, cg, cphiL, M);
@@ -941,9 +941,10 @@
     s.alpha += (aCmd - s.alpha) * (1 - Math.exp(-dt / (0.2 + 0.25 * s.spec.inertia)));
   }
 
-  // Roll. Airbus: the stick asks for a roll rate, let go the bank stays (up to 33°, beyond that it comes back to
-  // 33°); 67° at most. Conventional: the bank stays where it is left, up to 75°. Classics: the dihedral levels
-  // the wings by themselves. Each type rolls at its own rate (°/s at full).
+  // Roll. Airbus: the stick asks for a roll rate, let go the bank stays where it is. Conventional: the bank stays
+  // where it is left. No bank limit on any: it rolls all the way round if rolled; the load a steep turn takes is
+  // what limits it (the Airbus law holds the path up to 2.5 g, by hand it can be pulled past the wings' strength).
+  // Classics: the dihedral levels the wings by themselves. Each type rolls at its own rate (°/s at full).
   function rollLaw(dt) {
     const sp = s.spec;
     let rate = sp.roll * (airbus() ? 1 : clamp(s.V / (sp.vr * KT * 1.2), 0.4, 1.2));
@@ -951,8 +952,6 @@
     // the roll rate wanted; the aircraft gets into it and out of it at its own pace (s.p, its inertia)
     let want = 0;
     if (Math.abs(s.roll) > 0.02) want = s.roll * rate * (airbus() ? 1 : s.ailAuth);
-    else if (airbus() && Math.abs(s.phi) > 33) want = -Math.sign(s.phi) * Math.min(5, (Math.abs(s.phi) - 33) * 2);
-    else if (s.spec.softProt && lim() && Math.abs(s.phi) > 35) want = -Math.sign(s.phi) * Math.min(3, (Math.abs(s.phi) - 30) * 0.6); // (777: back to 30°)
     else if (sp.dihedral && !s.stalled) want = -Math.sign(s.phi) * Math.min(sp.dihedral, Math.abs(s.phi) * 0.5);
     // (stalled, a wing drops: a sudden roll that runs out at 25°, 45° on the classics, unless the stall goes on deeper)
     if (s.stalled) want += s.drop * clamp(1 - (s.phi * Math.sign(s.drop)) / (s.spec.law === 'classic' ? 45 : 25), 0, 1);
@@ -968,14 +967,12 @@
     const tau = sp.inertia * (airbus() ? 0.4 : 0.6);
     s.p += (want - s.p) * (1 - Math.exp(-dt / tau));
     s.phi += s.p * dt;
-    const most = airbus() ? 67 : 75;
-    if (Math.abs(s.phi) > most) {
-      // half a wing gone and more roll than the ailerons can hold: it rolls on over and goes out of control
-      if (Math.abs(s.dmgRoll) > s.ailAuth * 0.8 && Math.sign(s.phi) === Math.sign(s.dmgRoll) && Math.abs(s.phi) > 85) {
-        startTumble(`It rolled over with ${s.dmg.cut[0] && s.dmg.cut[1] ? 'both wings' : `the ${s.dmgRoll > 0 ? 'right' : 'left'} wing`} broken`);
-        return;
-      }
-      if (!s.dmgRoll || Math.abs(s.phi) > 89) { s.phi = Math.sign(s.phi) * Math.min(Math.abs(s.phi), s.dmgRoll ? 89 : most); s.p = 0; }
+    // no bank limit: it rolls as far as it is rolled, all the way round (the bank wraps at ±180°); what a steep bank
+    // costs is the load: holding the height in it takes 1/cos(bank) g, which loads the wings as any pull (structure())
+    if (s.phi > 180) s.phi -= 360; else if (s.phi < -180) s.phi += 360;
+    // half a wing gone and more roll than the ailerons can hold: it rolls on over and goes out of control
+    if (Math.abs(s.dmgRoll) > s.ailAuth * 0.8 && Math.sign(s.phi) === Math.sign(s.dmgRoll) && Math.abs(s.phi) > 85) {
+      startTumble(`It rolled over with ${s.dmg.cut[0] && s.dmg.cut[1] ? 'both wings' : `the ${s.dmgRoll > 0 ? 'right' : 'left'} wing`} broken`);
     }
   }
 
