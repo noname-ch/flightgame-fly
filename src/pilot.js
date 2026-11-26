@@ -397,8 +397,10 @@
       hideId: opts.plane ? opts.plane.id : null, mass: sp.toMass, prevAgl: null, ghReal: null, ghAt: 0,
       gref: null, aCmd: null, qCmd: 0, aTrim: null, deep: false, limiter: s.limiterPref !== false, p: 0, stalled: false, stallAmt: 0, buffet: 0, drop: 0, athr: sp.athr, spdSel: null, athrN1: null, iasPrev: null, iasAcc: 0, menu: false, lvrClb: false, sway: { p: 0, pv: 0, r: 0, rv: 0 }, vPrev: null, wind: null, track: null, gsMs: null,
       dmg: noDamage(), pieces: [], tumble: null, wreck: null, gone: false, flut: 0, overT: 0, dmgRoll: 0, ailAuth: 1,
+      belly: false, burnAt: null, fire: null, scrape: 0,
     });
     s.msgs = [];
+    if (G.blasts) for (let i = G.blasts.length - 1; i >= 0; i--) if (G.blasts[i].id === 'fly') G.blasts.splice(i, 1); // (the last crash's fires)
     const e = opts.end;
     let pts;
     if (opts.mode === 'takeover' && opts.state) {
@@ -510,7 +512,7 @@
   // Z keeps the flight as it is now; Backspace puts it back there (paused, P to go on), as often as it takes.
   const CK = ['lat', 'lon', 'h', 'groundH', 'V', 'gamma', 'psi', 'theta', 'phi', 'alpha', 'onGround', 'landed', 'n1', 'lever',
     'rev', 'revOk', 'gearDown', 'gear', 'conf', 'flapPos', 'sb', 'gs', 'armed', 'brake', 'parking', 'afloor', 'tail', 'mass',
-    'gref', 'aCmd', 'qCmd', 'aTrim', 'deep', 'limiter', 'p', 'trimStart', 'stalled', 'stallAmt', 'buffet', 'drop', 'athr', 'spdSel', 'athrN1', 'iasPrev', 'iasAcc', 'lvrClb', 'sway', 'vPrev', 'ghReal', 'calls', 'prevAgl', 'dmg', 'pieces', 'tumble', 'wreck', 'gone', 'flut', 'overT', 'dmgRoll', 'ailAuth', 'machSel', 'athrMode'];
+    'gref', 'aCmd', 'qCmd', 'aTrim', 'deep', 'limiter', 'p', 'trimStart', 'stalled', 'stallAmt', 'buffet', 'drop', 'athr', 'spdSel', 'athrN1', 'iasPrev', 'iasAcc', 'lvrClb', 'sway', 'vPrev', 'ghReal', 'calls', 'prevAgl', 'dmg', 'pieces', 'tumble', 'wreck', 'gone', 'belly', 'burnAt', 'fire', 'scrape', 'flut', 'overT', 'dmgRoll', 'ailAuth', 'machSel', 'athrMode'];
   function saveCheckpoint() {
     if (s.loading || s.crashed) { say('No checkpoint while crashed', 'amber', 2000); return; }
     const st = {};
@@ -525,6 +527,7 @@
     if (FG.fmgc && s.ck.fm) FG.fmgc.restore(s.ck.fm);
     if (FG.systems && s.ck.sys) FG.systems.restore(s.ck.sys);
     Object.assign(s, { crashed: null, touch: null, stick: 0, roll: 0, rud: 0, paused: true, help: false });
+    if (G.blasts) for (let i = G.blasts.length - 1; i >= 0; i--) if (G.blasts[i].id === 'fly') G.blasts.splice(i, 1);
     s.keys.clear(); s.msgs = []; lastV = null; s.trend = null;
     s.limiterPref = s.limiter; limiterButton();
     say(`⚑ Back at the checkpoint (${s.ck.where}) · P to go`, 'info', 4000);
@@ -837,7 +840,8 @@
     s.track = s.gsMs > 1 ? wrap360(Math.atan2(vE, vN) / DEG) : s.psi;
     s.lat += (vN * dt) / R_E / DEG;
     s.lon += (vE * dt) / (R_E * Math.cos(s.lat * DEG)) / DEG;
-    if (!s.onGround && s.h <= s.groundH) touchdown();
+    if (!s.onGround && !s.crashed) wingStrike(dt);
+    if (!s.crashed && !s.onGround && s.h <= s.groundH) touchdown();
     if (s.onGround) s.h = s.groundH;
     if (!s.crashed) buildings();
   }
@@ -994,7 +998,7 @@
   // its own (s.pieces) and the 3D view draws it, with the aircraft without it.
   const PART_TIP = 0.8, PART_WING = 0.5;
   const CL_AIL = 0.045; // rolling moment (per q·S·span) of the ailerons at full throw
-  function noDamage() { return { cut: [0, 0], elev: 0, elevOff: 0, rud: 0, engOut: [], thrPrev: null }; }
+  function noDamage() { return { cut: [0, 0], elev: 0, elevOff: 0, rud: 0, engOut: [], thrPrev: null, body: [0, 0], pod: [] }; }
   // the share of a half wing's lift beyond a break at `cut` half spans (an elliptical spread of lift), and how far out
   // (in half spans) it acted on average
   function lostLift(cut) {
@@ -1100,6 +1104,76 @@
     return true;
   }
 
+  // A wing that touches the ground in the air (a low pass or a landing with too much bank). The wing is a straight
+  // line out from the fuselage, rolled with the bank; its tip clears the ground on the wheels up to tipBank, an engine
+  // pod below the wing a few degrees more. Each part that goes into the ground breaks as the failures do: the tip
+  // tears off (breakOff), a pod that strikes kills its engine and may set it on fire (src/systems.js), a wing that
+  // goes in deep breaks off, and one that digs in at speed cartwheels the aircraft. The ground drags the wing back
+  // (it yaws towards it, loses speed) and pushes it up (the bank comes off).
+  function pods() {
+    const sp = s.spec, n = sp.engines;
+    if (s.type === 'GLOBAL7500' || sp.engine === 'prop') return []; // (engines on the tail; high wings: the props clear)
+    const extra = sp.engine === 'piston' ? 4 : sp.engine === 'sst' ? 4 : 3;
+    if (n === 2) return [{ i: 0, side: -1, f: 0.34, bank: sp.tipBank + extra }, { i: 1, side: 1, f: 0.34, bank: sp.tipBank + extra }];
+    if (n === 3) return [{ i: 0, side: -1, f: 0.3, bank: sp.tipBank + extra }, { i: 2, side: 1, f: 0.3, bank: sp.tipBank + extra }];
+    if (n === 4) return [{ i: 0, side: -1, f: 0.66, bank: sp.tipBank + 2 }, { i: 1, side: -1, f: 0.38, bank: sp.tipBank + 5 },
+      { i: 2, side: 1, f: 0.38, bank: sp.tipBank + 5 }, { i: 3, side: 1, f: 0.66, bank: sp.tipBank + 2 }];
+    return [];
+  }
+  function wingStrike(dt) {
+    const sp = s.spec, d = s.dmg, half = halfSpan();
+    const side = s.phi > 0 ? 1 : -1, k = side < 0 ? 0 : 1, nm = sideName(side);
+    const sb = Math.sin(Math.min(89, Math.abs(s.phi)) * DEG), agl = s.h - s.groundH;
+    // how far into the ground a point f half spans out goes, that clears it by `bank` degrees on the wheels
+    const depth = (f, bank) => f * half * (sb - Math.sin(bank * DEG)) - agl;
+    const reach = d.cut[k] || 1;
+    const dTip = depth(reach, sp.tipBank);
+    if (dTip <= 0) { s.scrape = 0; return; }
+    const kt = Math.round(ias());
+    const first = !s.scrape;
+    const rate = first ? 0 : (dTip - s.scrape) / dt; // (how fast it is going in, m/s)
+    s.scrape = dTip;
+    if (first) { say(`WING STRIKE — ${nm} wing on the ground at ${kt} kt`, 'red', 5000); speak('wing strike'); }
+    // a wing that digs in up to its middle, at speed: it catches and the aircraft cartwheels round it
+    if (depth(Math.min(reach, PART_WING), sp.tipBank) > 1 && s.V > 35) {
+      breakOff('wing', side, null, true);
+      crash(`The ${nm} wing dug in at ${kt} kt and ${Math.round(Math.abs(s.phi))}° of bank: it cartwheeled`, { slide: true, dig: true, spin: side * (90 + 60 * Math.random()) });
+      return;
+    }
+    // the tip: scraped along at walking pace it stays; faster it tears off
+    if (reach > PART_TIP && s.V > 15) breakOff('tip', side, `Wing strike at ${kt} kt: the ${nm} wing tip tore off`, true);
+    // deeper, or slammed in: the outer wing breaks
+    else if (reach <= PART_TIP && reach > PART_WING && s.V > 30 && (dTip > 1.5 || rate > 6)) {
+      breakOff('wing', side, `The ${nm} wing hit the ground at ${kt} kt and broke off`, true);
+      fuelFire(side, 'The wing\'s fuel tank ruptured: fire');
+    }
+    // the engines under that wing
+    for (const e of pods()) {
+      if (e.side !== side || d.pod.includes(e.i) || d.engOut.includes(e.i)) continue;
+      if ((d.cut[k] || 1) < e.f || depth(e.f, e.bank) <= 0) continue;
+      d.pod.push(e.i);
+      const fire = s.V > 40 && Math.random() < 0.55;
+      if (FG.systems && FG.systems.ready && FG.systems.ready()) {
+        FG.systems.set('fail', 'fail', e.i);
+        if (fire) FG.systems.set('fail', 'fire', e.i);
+      } else d.engOut.push(e.i);
+      say(`ENG ${e.i + 1} pod strike: the engine ${fire ? 'failed and is on fire' : 'failed'}`, 'red', 6000);
+    }
+    // the ground drags the wing back and pushes it up
+    const dig = clamp(dTip / 0.6, 0, 1);
+    s.psi = wrap360(s.psi + side * (8 + 20 * dig) * dt);
+    s.V = Math.max(0, s.V - (0.15 + 0.5 * dig) * G0 * dt);
+    s.p -= side * (30 + 120 * dig) * dt;
+    s.phi -= side * Math.min(Math.abs(s.phi), (4 + 25 * dig) * dt);
+  }
+  // A fuel fire in what's left of a wing (or the APU's for a wing without an engine): the engine on that side.
+  function fuelFire(side, why) {
+    const e = pods().filter((p) => p.side === side).sort((a, b) => a.f - b.f)[0];
+    if (!e || !FG.systems || !FG.systems.ready || !FG.systems.ready()) return;
+    FG.systems.set('fail', 'fire', e.i);
+    if (why) say(why, 'red', 6000);
+  }
+
   // the airframe's limits: past 1.3 × its limit load a wing tip tears off, past 1.5 × (its ultimate load) a wing
   // breaks, past 1.9 × both; past its dive speed (VD, about VMO + 50 kt / MMO + 0.07) it shakes, then flutter takes
   // the elevators, then the ailerons and a wing tip, and far past it the wing. True when it can't fly on.
@@ -1168,19 +1242,21 @@
   // let it (vt: the speed it falls at, m/s), turning over and over, and lies where it lands. d: metres east, north, up
   // from where it broke off; rot: radians turned about the vertical, the nose and the wing (js/view3d.js pilotPieces).
   let pieceN = 0;
-  function addPiece(part, vt, onGround) {
+  // o: { v (m/s east, north, up), w (turning, rad/s), mu (how hard it skids to a stop, in g), burn (charred 0…1) }
+  function addPiece(part, vt, onGround, o = {}) {
     const vh = s.V * Math.cos(s.gamma), psi = s.psi * DEG;
-    const v = [vh * Math.sin(psi), vh * Math.cos(psi), s.V * Math.sin(s.gamma)];
+    const v = o.v ? [...o.v] : [vh * Math.sin(psi), vh * Math.cos(psi), s.V * Math.sin(s.gamma)];
     const rnd = (a) => (Math.random() * 2 - 1) * a;
     const out = part.side || 0;
     if (!onGround) {
       // (a wing part kicks up with the lift it was carrying and out to its side)
       v[0] += Math.cos(psi) * out * 3; v[1] -= Math.sin(psi) * out * 3; v[2] += part.kind === 'wing' ? 4 + Math.random() * 4 : 1;
     }
-    const w = onGround ? [rnd(1.2), rnd(1.5), rnd(0.8)]
+    const w = o.w ? [...o.w] : onGround ? [rnd(1.2), rnd(1.5), rnd(0.8)]
       : part.kind === 'wing' ? [rnd(1.5), out * (3 + Math.random() * 4), rnd(4)] : [rnd(3), rnd(6), rnd(6)];
-    s.pieces.push({ id: `p${++pieceN}`, part, d: [0, 0, 0], v, rot: [0, 0, 0], w, vt, h0: s.h, g0: s.groundH, rest: false, age: 0 });
-    if (s.pieces.length > 12) s.pieces.shift();
+    s.pieces.push({ id: `p${++pieceN}`, part, d: [0, 0, 0], v, rot: [0, 0, 0], w, vt, h0: s.h, g0: s.groundH, rest: false, age: 0,
+      mu: o.mu ?? 0.8, burn: o.burn || 0 });
+    if (s.pieces.length > 16) s.pieces.shift();
   }
   function piecesStep(dt) {
     for (const q of s.pieces) {
@@ -1191,7 +1267,7 @@
       if (q.d[2] <= floor + 0.01) {
         // on the ground: it skids to a stop, lying flat
         const vh = Math.hypot(v[0], v[1]);
-        const k = vh > 0 ? Math.max(0, vh - 0.8 * G0 * dt) / vh : 0;
+        const k = vh > 0 ? Math.max(0, vh - q.mu * G0 * dt) / vh : 0;
         v[0] *= k; v[1] *= k; v[2] = 0; q.d[2] = floor;
         for (let i = 0; i < 3; i++) q.w[i] *= Math.exp(-dt / 0.4);
         for (const i of [1, 2]) q.rot[i] += (Math.round(q.rot[i] / Math.PI) * Math.PI - q.rot[i]) * (1 - Math.exp(-dt / 0.25));
@@ -1267,30 +1343,97 @@
     } else buildings();
   }
 
-  // The end: a fireball where it hits (the game's crash blasts, in real time: js/view3d.js updateBlasts); flown into
-  // the ground fast, nothing is left to draw (s.gone); landed too hard or with a wing dug in, the wreck slides on and
-  // slews round (s.wreck, slide: true; spin °/s), the broken parts lying about.
+  // The end, as real crashes end, by how hard it hit:
+  // - whole: a belly landing, a gear collapse, a slow one: the gear folds, the wreck slides on its belly and slews
+  //   round, the broken parts lying about; a fire only if a wing (its fuel) was torn open.
+  // - break: hit hard, or slid off fast: the fuselage breaks ahead of the wing and/or behind it (js/livery.js
+  //   bodyBreaks), the nose sliding on ahead, the tail stopping behind and turned, the middle with the wings in
+  //   between; a fireball where it hit and the fuel burning round the middle where it stops, charring it.
+  // - gone: flown into the ground fast or steep: it goes up in a fireball as big as its fuel, the burning debris
+  //   (the tail, the wings, the nose) thrown on along its track; the rest is not left to draw (s.gone).
   function crash(why, o = {}) {
     if (s.crashed) return;
     const tu = s.tumble;
-    const V = tu ? Math.hypot(...tu.v) : s.V;
-    const vz = tu ? tu.v[2] : s.V * Math.sin(s.gamma);
-    s.crashed = why;
-    if ((V > 40 || -vz > 10) && G.blasts) {
-      G.blasts.push({ id: 'fly', lat: s.lat, lon: s.lon, altM: s.groundH, real: true });
-      if (G.blasts.length > 10) G.blasts.shift();
+    const vh0 = s.V * Math.cos(s.gamma), ps0 = s.psi * DEG;
+    const v3 = tu ? [...tu.v] : [vh0 * Math.sin(ps0), vh0 * Math.cos(ps0), s.V * Math.sin(s.gamma)];
+    if (o.vz != null) v3[2] = o.vz; // (touchdown: the sink rate it hit with, before it levelled the path)
+    const V = Math.hypot(...v3), vn = Math.max(0, -v3[2]), vh = Math.hypot(v3[0], v3[1]);
+    const trk = vh > 1 ? Math.atan2(v3[0], v3[1]) : ps0;
+    const sp = s.spec, d = s.dmg, slide = !!o.slide;
+    const fuel = clamp(Math.sqrt(s.mass / 70000), 0.5, 2.2); // (the bigger the aircraft, the more fuel it carries)
+    const vRot = sp.vr * KT;
+    const fate = vn > 30 || (!slide && (V > 80 || vn > 25)) ? 'gone'
+      : (slide && (vn > 7 || vh > 1.2 * vRot)) || (!slide && V > 30) ? 'break' : 'whole';
+    const rnd = (a) => (Math.random() * 2 - 1) * a;
+    const along = (speed, turn, up = 0) => [speed * Math.sin(trk + turn), speed * Math.cos(trk + turn), up];
+    let tail = '';
+    if (fate === 'gone') {
+      s.gone = true;
+      blast(fuel * clamp(0.8 + V / 150, 1, 1.8));
+      blast(fuel * 0.9, 'pool', 240);
+      // what's thrown clear: big pieces at a few hundred km/h; at airliner cruise speeds only small ones
+      const small = V > 140 || vn > 90;
+      const throwIt = (part, f, vt, mu) => addPiece(part, vt, false,
+        { v: along(V * f * (0.7 + 0.6 * Math.random()), rnd(0.35), 6 + Math.random() * 14), w: [rnd(3), rnd(5), rnd(5)], mu, burn: 0.85 });
+      if (small) {
+        if (!d.rud) throwIt({ kind: 'rud', side: 0 }, 0.45, 26, 0.7);
+        if (d.elev !== 2) throwIt({ kind: 'elev', side: 0 }, 0.4, 26, 0.7);
+        for (const sd of [-1, 1]) if (!d.cut[sd < 0 ? 0 : 1]) throwIt({ kind: 'wing', side: sd, cut: PART_TIP, out: 0 }, 0.4, 28, 0.7);
+      } else {
+        throwIt({ kind: 'body', side: -1 }, 0.35, 40, 0.6);
+        throwIt({ kind: 'body', side: 1 }, 0.3, 45, 0.8);
+        for (const sd of [-1, 1]) if (!d.cut[sd < 0 ? 0 : 1] || d.cut[sd < 0 ? 0 : 1] > PART_WING) throwIt({ kind: 'wing', side: sd, cut: PART_WING, out: d.cut[sd < 0 ? 0 : 1] || 0 }, 0.3, 45, 0.7);
+      }
+      tail = ': it went up in a fireball';
+    } else {
+      const nose = fate === 'break' && (vn > 12 || vh > 1.4 * vRot || !slide);
+      const go = slide ? vh : 0.35 * V; // (into a hillside: what's left ploughs on a little)
+      if (fate === 'break') {
+        const flags = (d.elev === 2 ? 1 : 0) + (d.rud ? 2 : 0);
+        // the tail: torn off behind the wing, it stops first, turned across
+        addPiece({ kind: 'body', side: -1, flags }, 40, true, { v: along(go * 0.93, rnd(0.2)), w: [rnd(0.9), rnd(0.4), 0], mu: 0.65, burn: 0.1 });
+        d.body[1] = 1;
+        if (nose) {
+          // the nose: ahead of the wing, it slides on furthest, a little to one side
+          addPiece({ kind: 'body', side: 1 }, 45, true, { v: along(go * 0.98, rnd(0.25)), w: [rnd(0.5), rnd(0.3), 0], mu: 0.5, burn: 0.15 });
+          d.body[0] = 1;
+        }
+        blast(fuel * 0.9);
+        s.fire = { scale: fuel * 0.8, secs: 300 };
+        s.burnAt = performance.now();
+        tail = nose ? ': the fuselage broke in three' : ': the fuselage broke behind the wing';
+      } else if (d.cut.some((c) => c && c <= PART_WING) || o.dig) {
+        // a wing torn open: its fuel burns where the wreck stops
+        if (V > 20) blast(fuel * 0.5);
+        s.fire = { scale: fuel * 0.5, secs: 200 };
+        s.burnAt = performance.now();
+      }
+      s.wreck = go > 3 ? { v: go, trk: trk / DEG, hdg: s.psi, spin: o.spin || 0, bank: s.phi, pitch: s.theta,
+        side: Math.sign(s.phi) || 1, dug: Math.abs(o.spin || 0) > 60, mu: fate === 'break' ? 0.6 : 0.45 } : null;
     }
-    s.gone = !o.slide && (V > 80 || -vz > 35);
-    s.wreck = o.slide && V > 3 ? { v: V * Math.cos(s.gamma), trk: s.psi, hdg: s.psi, spin: o.spin || 0, bank: s.phi, pitch: s.theta,
-      side: Math.sign(s.phi) || 1, dug: Math.abs(o.spin || 0) > 60 } : null;
+    // (the gear folds under it: it lies on its belly)
+    if (V > 15 || s.gear < 0.99) { s.belly = true; s.gear = 0; s.gearDown = false; }
+    s.crashed = why + tail;
     s.tumble = null;
     s.V = 0; s.lever = 0; s.n1 = s.n1.map(() => IDLE_N1);
+    if (s.fire && !s.wreck) startFire();
     speak('crash');
+  }
+  // the game's crash blasts (js/view3d.js updateBlasts), in real time: a fireball, or a fire burning on (pool)
+  function blast(scale, kind, secs) {
+    if (!G.blasts) return;
+    G.blasts.push({ id: 'fly', lat: s.lat, lon: s.lon, altM: s.groundH, real: true, scale, kind, secs });
+    if (G.blasts.length > 10) G.blasts.shift();
+  }
+  function startFire() {
+    if (!s.fire) return;
+    blast(s.fire.scale, 'pool', s.fire.secs);
+    s.fire = null;
   }
   function wreckStep(dt) {
     const w = s.wreck;
-    if (w.v <= 0) return;
-    w.v = Math.max(0, w.v - 0.45 * G0 * dt); // (on its belly, or a stub of wing: hard)
+    if (w.v <= 0) { startFire(); return; }
+    w.v = Math.max(0, w.v - w.mu * G0 * dt); // (on its belly, or a stub of wing: hard)
     w.hdg = wrap360(w.hdg + w.spin * dt);
     w.spin *= Math.exp(-dt / 2.5);
     // it settles: level on its belly, or down on the side whose wing broke
@@ -1350,7 +1493,7 @@
     else if (s.V > sp.tyreKt * KT) why = 'Far too fast for the tyres';
     if (why) {
       if (dig) breakOff('wing', side, null, true);
-      crash(why, { slide: !hill, spin: dig ? side * (90 + 60 * Math.random()) : (Math.random() - 0.5) * 30, hard: -fpm });
+      crash(why, { slide: !hill, dig, vz: vs, spin: dig ? side * (90 + 60 * Math.random()) : (Math.random() - 0.5) * 30, hard: -fpm });
       return;
     }
     // a wing tip that touches the runway (a little past the bank it clears) is torn off; the rest of it lands
@@ -1465,6 +1608,7 @@
     }
     if (!s.paused && !s.menu) piecesStep(Math.min(dtAll, 0.1));
     if (!s.paused && !s.menu && s.crashed && s.wreck) wreckStep(Math.min(dtAll, 0.1));
+    else if (s.crashed && s.fire) startFire();
     if (!s.paused && !s.menu && !s.crashed) {
       inputs(dtAll);
       let left = Math.min(dtAll, 0.25);
@@ -1491,13 +1635,16 @@
       heading: tu ? wrap360(tu.hdg) : wr ? wrap360(wr.hdg) : wrap360(s.psi + (s.onGround ? 0 : s.alpha * Math.sin(s.phi * DEG))),
       bank: tu ? tu.bank : wr ? wr.bank : s.phi + s.sway.r + shakeR, pitch: tu ? tu.pitch : wr ? wr.pitch : s.theta + s.sway.p + shakeP, flying: true,
       // what broke off (js/view3d.js drawPilot, js/livery.js PARTS) and the parts falling away or lying about
-      dmg: { cut: s.dmg.cut, elev: s.dmg.elevOff, rud: s.dmg.rud ? 1 : 0 },
-      pieces: s.pieces.map((q) => ({ id: q.id, part: q.part, d: q.d, rot: q.rot, age: q.age, down: q.d[2] <= q.g0 - q.h0 + 0.05 })),
+      dmg: { cut: s.dmg.cut, elev: s.dmg.elevOff, rud: s.dmg.rud ? 1 : 0, body: s.dmg.body },
+      pieces: s.pieces.map((q) => ({ id: q.id, part: q.part.kind === 'body' ? { ...q.part, out: q.part.flags || 0 } : q.part, d: q.d, rot: q.rot, age: q.age,
+        down: q.d[2] <= q.g0 - q.h0 + 0.05, burn: q.burn })),
       gone: s.gone, // (destroyed on impact: nothing left to draw)
+      belly: !!(s.crashed && s.belly), // (the gear folded: on its belly)
+      burn: s.burnAt ? clamp((performance.now() - s.burnAt) / 90000, 0.05, 0.8) : 0, // (charred by the fire round it)
       st: { phase, speedKmh: kmh, altFt: s.h / FT, fieldFt: s.groundH / FT, ground: s.onGround, windKt: s.wind ? s.wind.kt : 0, windFrom: s.wind ? s.wind.from : 0, gusty: !!(s.wind && s.wind.gusty), airFrac: 0 },
       pilot: { gear: s.gear, flap: confAt(s.flapPos).flap, ail: s.roll, elev: s.onGround ? s.stick : s.stick * 0.7, rud: s.onGround ? s.rud : s.rud, rev: s.rev, n1: s.n1.reduce((x, y) => x + y, 0) / s.n1.length, gamma: s.gamma / DEG, vs,
         nz: (s.load || 0) + bf * 0.25 * Math.sin(tb * 13), stall: s.stallAmt || 0,
-        lights: FG.systems ? FG.systems.lights() : null }, // (the overhead's switches: src/systems.js)
+        lights: s.crashed ? { nav: 0, beacon: 0, strobe: 0, land: 0, wing: 0 } : FG.systems ? FG.systems.lights() : null }, // (the overhead's switches: src/systems.js; a wreck: dark)
     };
   }
 

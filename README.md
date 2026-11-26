@@ -211,7 +211,7 @@ page while the APU runs, and the WHEEL page otherwise.
 
 Parts break off the way they do on real aircraft, and the game's 3D view draws the aircraft without them and the
 parts falling away, tumbling and lying where they land (the game's `js/livery.js` PARTS cut each model into wing tips,
-outer wings, elevators and rudder):
+outer wings, elevators and rudder, and its fuselage into the nose, the middle and the tail):
 
 - **Overstress:** past 1.3 × the type's limit load (or −1.3 g) a wing tip tears off, past 1.5 × (its ultimate load) a
   wing breaks, past 1.9 × both. The wing going up in a rolling pull carries more and breaks first.
@@ -227,9 +227,20 @@ outer wings, elevators and rudder):
 - **Elevators broken off:** no pitch control at all except thrust, and the nose wanders: as the crews of United 232
   and DHL's A300 over Baghdad flew theirs.
 - **Rudder broken off:** the rudder pedals do nothing in the air.
-- **On the runway:** a wing tip a little past the bank it clears is torn off and the aircraft lands on; more bank and
-  the wing digs in and breaks off: it cartwheels, and the wreck slides on and slews round.
-- **The crash:** a fireball where it hits; flown into the ground fast, nothing is left of it.
+- **Wing strike:** a wing that touches the ground, in the air or landing, breaks with the same failures: past the
+  bank its tip clears (about 10° for an A320) the tip tears off; a few degrees more and the engine pod under that wing
+  strikes, which fails the engine and often sets it on fire (the overhead's FIRE drill: `src/systems.js`); deeper the
+  outer wing breaks off and its tank catches fire; dug in up to its middle it cartwheels. The ground drags the wing
+  back (it yaws towards it and slows) and pushes it up (the bank comes off), so a light strike can be flown away.
+- **The crash,** by how hard it hits:
+  - a belly landing, a gear collapse or a slow one: the gear folds and the wreck slides on its belly and slews
+    round; it burns only if a wing (its fuel) was torn open.
+  - hit hard (over about 1,400 ft/min) or slid off fast: the fuselage breaks ahead of the wing and/or behind it. The
+    nose slides on furthest, the tail stops behind and turns across, the middle with the wings in between; a
+    fireball where it hit, then the fuel burns round the middle where it stops, black smoke rising, and it chars.
+  - flown into the ground fast or steep (over about 6,000 ft/min, or 155 kt into a hillside): it goes up in a
+    fireball as big as its fuel, rising as it burns; the charred tail, nose and wings are thrown on along its
+    track (only small bits at cruise speeds), and a fire burns there for minutes.
 
 To practise, the Esc menu has **Failures**: a wing tip (left or right), the elevator jamming, the elevators or the
 rudder breaking off, the left wing breaking. Checkpoints (Z) keep the damage too.

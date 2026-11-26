@@ -277,6 +277,34 @@ try {
       await key('Escape'); await key('q');
       const off = await evaluate(() => ({ active: FG.pilot.active, drawn: !!FG.view3d.pilotE, menu: !document.getElementById('menu').hidden, pm: !!document.getElementById('pilot-menu') }));
       if (off.active || off.menu || off.pm) errors.push(`fly it yourself: Esc, Q did not just leave the plane: ${JSON.stringify(off)}`);
+      // crashes (src/pilot.js wingStrike, crash): an A320 on the runway, put where it hits, stepped by hand
+      step('crashes: a wing strike tears the tip off and the pod strike kills that engine; a hard impact breaks the fuselage and burns; a fast dive goes up in a fireball');
+      const startA320 = () => evaluate(() => {
+        if (FG.pilot.active) FG.pilot.stop();
+        const el = document.getElementById('pilot-start');
+        if (el && el.querySelector('[data-ps=no]')) el.querySelector('[data-ps=no]').click();
+        const r = G.airportRunways('ZRH')[0];
+        const course = G.bearing({ lat: r[0], lon: r[1] }, { lat: r[2], lon: r[3] });
+        FG.pilot.start({ type: 'A320', mode: 'runway', end: { code: 'ZRH', lat: r[0], lon: r[1], far: [r[2], r[3]], course, len: G.runwayLength(r), width: 45, name: 'T' } });
+      });
+      const crashCase = async (set, steps) => {
+        await startA320();
+        await waitFor(() => FG.pilot.active && !FG.pilot.state.loading, 20000, 'the A320 for the crash step');
+        return evaluate((set, steps) => {
+          const s = FG.pilot.state;
+          Object.assign(s, set, { onGround: false, h: s.groundH + set.h });
+          for (let i = 0; i < steps; i++) FG.pilot.step(0.02);
+          return { crashed: s.crashed, cut: s.dmg.cut, pod: s.dmg.pod, body: s.dmg.body, gone: s.gone, belly: s.belly,
+            pieces: s.pieces.map((q) => q.part.kind), blasts: G.blasts.filter((b) => b.id === 'fly').map((b) => b.kind || 'boom') };
+        }, set, steps);
+      };
+      const strike = await crashCase({ h: 0.2, V: 72, gamma: 0, theta: 4, alpha: 4, phi: 16, p: 0, lever: 0.5, gearDown: true, gear: 1 }, 3);
+      if (strike.crashed || !(strike.cut[1] > 0.5) || !strike.pod.length) errors.push(`crashes: a 16° wing strike did not tear the tip off and strike the pod: ${JSON.stringify(strike)}`);
+      const hard = await crashCase({ h: 3, V: 78, gamma: -0.2, theta: -1, alpha: 4, phi: 0, lever: 0.3, gearDown: true, gear: 1 }, 300);
+      if (!hard.crashed || !hard.body[1] || !hard.belly || !hard.pieces.includes('body') || !hard.blasts.includes('boom')) errors.push(`crashes: hitting at 3000 ft/min did not break the fuselage: ${JSON.stringify(hard)}`);
+      const dive = await crashCase({ h: 40, V: 120, gamma: -0.35, theta: -18, alpha: 2, phi: 0, lever: 0.8, gearDown: false, gear: 0 }, 300);
+      if (!dive.gone || !dive.blasts.includes('pool') || dive.pieces.length < 2) errors.push(`crashes: a fast dive into the ground did not go up in a fireball: ${JSON.stringify(dive)}`);
+      await evaluate(() => { FG.pilot.stop(); const el = document.getElementById('pilot-start'); if (el && el.querySelector('[data-ps=no]')) el.querySelector('[data-ps=no]').click(); });
       // every other type: starts on the runway with its own engines and spools up at take-off thrust
       step('fly it yourself: each of the sixteen aircraft starts, is drawn and spools up');
       const types = await evaluate(() => Object.keys(FG.pilot.types));
