@@ -165,6 +165,48 @@ Y MCDU, plus all of the game's flying keys (H lists them).
 All aircraft except the DC-3 and Ju 52 have the autopilot. Types without autothrust (Q400, ATR) need the power set
 by hand.
 
+## The 3D flight deck and the systems
+
+In the cockpit camera (C) the Airbuses have a 3D flight deck: the A350s and the A380 the A350's, the A320, A330
+and A340 the A320 family's (six square screens: FMA + PFD, ND, the E/WD over the SD, ND, PFD; the MCDUs on the
+pedestal). Drag to look round; look up and to the right for the overhead panel.
+
+**Click the controls in 3D:**
+
+- **Pushbuttons, EFIS, FCU buttons:** click.
+- **Knobs:**
+  - the mouse wheel turns them (Shift: ×10);
+  - a click pushes and a right-click pulls;
+  - a click on the knob's left or right edge turns it a step.
+- **Switches:** a click on the upper half moves the switch up, a click on the lower half moves it down.
+- **Hover:** shows what a control is.
+- **Also clickable:** the gear lever, the autobrake, the parking brake, and the MCDU (it opens the MCDU).
+
+**The overhead page** (0, or 🔆 Overhead) has the same switches for any type and camera (`src/systems.js`):
+
+- **Exterior lights:** strobe (OFF / AUTO / ON), beacon, wing, nav & logo, runway turn-off, landing, nose. The 3D
+  aircraft shows them.
+- **Interior lights:** dome, flood and panel lighting light the deck. ANN LT TEST lights every annunciator.
+- **Signs:** seat belts and no smoking, with the cabin chime.
+- **APU:** MASTER SW, then START; about a minute to AVAIL. APU BLEED gives air for engine starts.
+- **Engines:**
+  - ENG MASTER OFF cuts an engine's fuel: it runs down and gives no thrust.
+  - To start it again: ENG MODE IGN/START, then the master ON. It needs air from the APU's bleed, another engine,
+    or 220 kt of ram air, and takes about 40 s to idle.
+- **Fire:**
+  - **Warning:** an engine or APU fire lights the master warning and the FIRE pushbutton, sounds the chime, and puts
+    the procedure on the E/WD.
+  - **Fighting it:** push the FIRE pushbutton (fuel cut, squibs armed), then AGENT 1. If it is still burning after
+    30 s, AGENT 2. A bottle works best on an engine that is shut down.
+  - **Left alone:** an engine left running in a fire seizes after 40 s.
+- **Anti-ice, wipers and the fire TEST button.**
+- **FAILURES:** start a fire or an engine failure yourself, or switch on RANDOM (off by default) for one now and
+  then.
+
+**The E/WD** shows the warnings and cautions with the actions still to do in cyan, the T.O memo on the ground, the
+LDG memo under 2000 ft, and the green memos. The SD shows the ENG page when an engine is out or starting, the APU
+page while the APU runs, and the WHEEL page otherwise.
+
 ## Files
 
 | File | What it is |
@@ -172,7 +214,8 @@ by hand.
 | `index.html` | Generated from `flightgame/index.html` by `tools/build_index.py`: run it after every submodule update. |
 | `src/pilot.js` | The flying: physics (with the wind), PFD, ECAM, the A350's screens, checkpoints. It came from the game's old `js/pilot.js` and now lives only here. |
 | `src/select.js` | The start screen (`FG.flySelect`): gallery, airport search and map, start, livery, time, wind. |
-| `src/cockpit3d.js` | The A350s' 3D flight deck (`FG.cockpit3d`, drawn by the game's view3d.js in the cockpit camera). |
+| `src/cockpit3d.js` | The 3D flight decks, A350 and A320 family (`FG.cockpit3d`, drawn by the game's view3d.js in the cockpit camera); its panels are clicked in 3D. |
+| `src/systems.js` | Lights, signs, APU, engine masters, fire and extinguishers, the E/WD's memo, the overhead page (`FG.systems`). |
 | `src/fmgc.js` | Autopilot, flight directors, autothrust modes, flight plan, autoland, autobrake; draws the FMA, FD bars and ND. |
 | `src/fcu.js` | The glareshield panel. |
 | `src/mcdu.js` | The MCDU. |
@@ -183,6 +226,7 @@ by hand.
 ## Testing
 
     node test/smoke.mjs                        # the page, the start screen, the wind, every type (about 3 min)
+    node test/systems.mjs                      # the A320 deck: real clicks, an engine fire fought, a relight (SHOTS=dir: screenshots)
     python test/run.py [FROM TO [TYPE]]        # e.g. python test/run.py LHR DUB B747-400
 
 This flies a whole flight headless in Chrome (no 3D, flat ground) as fast as the CPU allows:
