@@ -1429,6 +1429,8 @@
     s.tumble = null;
     s.V = 0; s.lever = 0; s.n1 = s.n1.map(() => IDLE_N1);
     if (s.fire && !s.wreck) startFire();
+    // (from inside, the fireball is round the camera and nothing shows: out to the chase camera to see it)
+    if (s.cam !== 'chase' && FG.view3d && FG.view3d.pilotCam) FG.view3d.pilotCam(s.cam = 'chase');
     speak('crash');
   }
   // the game's crash blasts (js/view3d.js updateBlasts), in real time: a fireball, or a fire burning on (pool)
