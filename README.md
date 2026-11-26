@@ -324,12 +324,31 @@ outer wings, elevators and rudder, and its fuselage into the nose, the middle an
 To practise, the Esc menu has **Failures**: a wing tip (left or right), the elevator jamming, the elevators or the
 rudder breaking off, the left wing breaking. Checkpoints (Z) keep the damage too.
 
+## Sounds
+
+With the game's sound on (M), the flight deck sounds as each aircraft's does (`src/cocksnd.js`):
+
+- **The warning voice:** PULL UP, TERRAIN AHEAD, SINK RATE, TOO LOW GEAR / FLAPS, GLIDE SLOPE, BANK ANGLE, the radio
+  height callouts, V1 / rotate, minimum, retard. Each family has its own recorded voice and words: the Airbuses
+  ("twenty five hundred", "retard", "stall, stall"), the Boeings ("two thousand five hundred", "minimums"; a whoop
+  whoop before PULL UP), the turboprops and the Global 7500, Concorde (an older, narrower speaker). The DC-3 and the
+  Ju 52 have no warning computer: no voice. The recordings are in `sounds/voice/<family>/` (`tools/build_voices.py`).
+- **The warning tones:** Airbus: the continuous repetitive chime, the stall cricket, the cavalry charge. Boeing,
+  turboprops, Concorde: the fire bell, the overspeed clacker, the stick shaker, the autopilot wailer, the take-off
+  config horn, the master warning beeper (Concorde a gong).
+- **The aircraft:** the air rushing past (muffled in the cockpit, louder outside), the engines (a thrum on the
+  propellers), the flap and gear motors with their clunks, the lever's detent, gear, flaps and speed brakes rumbling
+  in the airflow, buffet, the runway under the wheels, touchdowns as hard as they were. Metal creaks when it's
+  overstressed; a wing tip, a wing, the elevators or the rudder tear off with a crack, a bang and tearing metal; a wing
+  scraping the ground grinds; the impact crunches, the fuel goes up with a whoomp and the fire roars and crackles.
+
 ## Files
 
 | File | What it is |
 |---|---|
 | `index.html` | Generated from `flightgame/index.html` by `tools/build_index.py`: run it after every submodule update. |
 | `src/pilot.js` | The flying: physics (with the wind), PFD, ECAM, the A350's screens, checkpoints. It came from the game's old `js/pilot.js` and now lives only here. |
+| `src/cocksnd.js` | The flight deck's sounds (`FG.cocksnd`): each family's warning voice and tones, the airflow, motors, breaking parts, crashes. |
 | `src/select.js` | The start screen (`FG.flySelect`): gallery, airport search and map, start, livery, time, wind. |
 | `src/cockpit3d.js` | The 3D flight decks, A350 and A320 family (`FG.cockpit3d`, drawn by the game's view3d.js in the cockpit camera); its panels are clicked in 3D. |
 | `src/systems.js` | Lights, signs, APU, engine masters, fire and extinguishers, the E/WD's memo (`FG.systems`); other systems plug in. |

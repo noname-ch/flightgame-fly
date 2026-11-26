@@ -298,6 +298,7 @@
     s.msgs.push({ text, level, until: performance.now() + ms });
   }
   function speak(text) {
+    if (FG.cocksnd && FG.cocksnd.say(text)) return; // (in this aircraft's own recorded voice, or a sound: src/cocksnd.js)
     if (!FG.sound || !FG.sound.on || !window.speechSynthesis) return;
     try {
       speechSynthesis.cancel();
@@ -1712,7 +1713,8 @@
       while (left > 1e-6) { const dt = Math.min(0.02, left); if (FG.fmgc) FG.fmgc.control(dt); physics(dt); left -= dt; if (s.crashed) break; }
     }
     if (FG.systems) FG.systems.step(dtAll);
-    draw(s.crashed ? [] : warnings());
+    s.warn = s.crashed ? [] : warnings(); // (src/cocksnd.js sounds them)
+    draw(s.warn);
   }
 
   // The pose view3d draws: degrees, metres; altM: the wheels' height above the ground; st: as G.flightState gives,

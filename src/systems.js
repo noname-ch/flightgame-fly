@@ -97,7 +97,8 @@
     } catch (e) { /* no audio */ }
   }
   const snd = {
-    crc: () => tone([1100, 1100, 1100], 0.13, 0.04, 0.09, 'triangle'), // (the continuous repetitive chime, once round)
+    // (the continuous repetitive chime, once round; a Boeing, a turboprop, Concorde ring their fire bell: src/cocksnd.js)
+    crc: () => { if (FG.cocksnd && FG.cocksnd.bell()) return; tone([1100, 1100, 1100], 0.13, 0.04, 0.09, 'triangle'); },
     caution: () => tone([1000], 0.5, 0, 0.08),
     cabin: () => tone([988, 784], 0.6, 0.05, 0.06), // (the cabin's two-tone ding for the signs)
     click: () => tone([2400], 0.012, 0, 0.05, 'square'),

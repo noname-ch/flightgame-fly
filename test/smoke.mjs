@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Smoke test for the fly page: serves this repo (the game comes from the flightgame/ submodule), loads index.html in
 // headless Chrome and flies: the start screen, an A350 lined up at Zurich (TOGA, the keys are the plane's, its 3D
-// cockpit, a checkpoint, Esc menu, leave), then each of the sixteen types starts and spools up. Fails on any script
+// cockpit, a checkpoint, Esc menu, leave), then each of the sixteen types starts and spools up; the cockpit sounds (muted). Fails on any script
 // error, console.error or missing file of our own.
 //
 //   node test/smoke.mjs            (needs Node 22+ and Chrome or Chromium; CHROME=/path overrides)
@@ -21,7 +21,7 @@ const warnings = [];
 // ---------- static server on a free port ----------
 const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css',
   '.json': 'application/json', '.webmanifest': 'application/manifest+json', '.svg': 'image/svg+xml',
-  '.png': 'image/png', '.webp': 'image/webp', '.glb': 'model/gltf-binary' };
+  '.png': 'image/png', '.mp3': 'audio/mpeg', '.webp': 'image/webp', '.glb': 'model/gltf-binary' };
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, 'http://x');
   let file = path.join(ROOT, decodeURIComponent(url.pathname));
@@ -333,6 +333,27 @@ try {
         }
         await evaluate(() => FG.pilot.stop());
       }
+      // the flight deck's sounds (src/cocksnd.js; muted): each family its own voice and tones, the DC-3 none
+      step('cockpit sounds: a 737 calls "one thousand" in its own voice and wails as the wing tears off; a DC-3 says nothing');
+      const sounds = {};
+      for (const type of ['B737-800', 'DC-3']) {
+        await evaluate((type) => {
+          FG.sound.set({ on: true });
+          const r = G.airportRunways('ZRH')[0];
+          const course = G.bearing({ lat: r[0], lon: r[1] }, { lat: r[2], lon: r[3] });
+          FG.pilot.start({ type, mode: 'final', end: { code: 'ZRH', lat: r[0], lon: r[1], far: [r[2], r[3]], course, len: G.runwayLength(r), width: 45, name: 'T' } });
+        }, type);
+        await waitFor(() => FG.pilot.active && !FG.pilot.state.loading && FG.cocksnd.ctx, 20000, `the ${type} with its sounds`);
+        await sleep(1500);
+        await evaluate(() => { FG.cocksnd.log.length = 0; FG.pilot.state.calls = {}; FG.pilot.api.speak('one thousand'); FG.pilot.fail('wingL'); });
+        await waitFor(() => FG.cocksnd.log.some((x) => x.what === 'tear') && FG.cocksnd.log.some((x) => x.what === 'say a1000'), 5000);
+        sounds[type] = await evaluate(() => ({ fam: FG.cocksnd.family, log: FG.cocksnd.log.map((x) => x.what), lvl: FG.cocksnd.level() }));
+        await evaluate(() => FG.pilot.stop());
+      }
+      const b = sounds['B737-800'], d = sounds['DC-3'];
+      if (b.fam !== 'boeing' || !b.log.includes('say a1000') || !b.log.includes('tear') || !b.log.includes('wailer') || !(b.lvl > 0)) errors.push(`cockpit sounds, 737: ${JSON.stringify(b)}`);
+      if (d.fam !== 'classic' || d.log.some((w) => /^say /.test(w)) || !d.log.includes('tear')) errors.push(`cockpit sounds, DC-3: ${JSON.stringify(d)}`);
+      await evaluate(() => FG.sound.set({ on: false }));
     }
 } catch (e) {
   errors.push(`test stopped: ${e.message}`);

@@ -1073,7 +1073,8 @@
     } catch (e) { /* no audio */ }
   }
   const sounds = {
-    cavalry: () => tone([523, 659, 784, 1047, 784, 1047], 0.11, 0.02, 0.08),
+    // (a Boeing's wailer instead, and so on: src/cocksnd.js)
+    cavalry: () => { if (!(FG.cocksnd && FG.cocksnd.apOff())) tone([523, 659, 784, 1047, 784, 1047], 0.11, 0.02, 0.08); },
     chime: () => tone([1200], 0.25, 0, 0.08, 'sine'),
   };
 
