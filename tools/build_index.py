@@ -36,7 +36,7 @@ def main():
     once(r'<title>[^<]*</title>', '<title>Flightgame · Fly</title>')
     once(r'(<link rel="stylesheet" href="css/themes\.css\?v=\d+">)', r'\1\n  <link rel="stylesheet" href="../css/fly.css?v=' + v + '">')
     once(r'(<script src="js/game\.js\?v=\d+"></script>)', r'\1\n  <script src="../src/guard.js?v=' + v + '"></script>')
-    ours = '\n  '.join(f'<script src="../src/{f}.js?v={v}"></script>' for f in ('pilot', 'fmgc', 'fcu', 'mcdu', 'boot'))
+    ours = '\n  '.join(f'<script src="../src/{f}.js?v={v}"></script>' for f in ('pilot', 'select', 'fmgc', 'fcu', 'mcdu', 'boot'))
     once(r'<script src="js/flylink\.js\?v=\d+"></script>', ours)
     once(r'(<script type="module" async src="js/view3d\.js\?v=\d+"></script>)',
          r'<script type="module" src="../src/cockpit3d.js?v=' + v + r'"></script>\n  \1')

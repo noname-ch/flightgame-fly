@@ -220,9 +220,9 @@
   // the conventional types, it can stall, overbank and pull as hard as the stick asks.
   const isFbw = () => s.spec.law === 'airbus'; // (the Airbuses and the Global 7500: normal law with hard protections)
   const isAirbus = () => s.spec.maker === 'Airbus'; // (LVR CLB, alpha floor)
-  const airbus = () => isFbw() && s.limiter;
+  const airbus = () => isFbw() && s.limiter && !(s.dmg && s.dmg.elev); // (a broken elevator: the computers drop to direct law)
   const lim = () => s.limiter || !s.spec.prot; // (protections on; a type without any is always "on")
-  const lawName = () => (lim() ? s.spec.lawName : isFbw() ? s.spec.directName : 'PROT OFF');
+  const lawName = () => (s.dmg && s.dmg.elev && isFbw() ? s.spec.directName : lim() ? s.spec.lawName : isFbw() ? s.spec.directName : 'PROT OFF');
   const lastConf = () => CONF.length - 1;
   const CAMS = ['chase', 'cockpit', 'wing', 'flyby'];
 
@@ -395,7 +395,8 @@
       conf: sp.toConf, flapPos: sp.toConf, sb: 0, gs: 0, armed: sp.groundSpoilers, brake: 0, parking: false, afloor: false,
       stick: 0, roll: 0, rud: 0, crashed: null, touch: null, tail: false, paused: false, calls: {}, near: null,
       hideId: opts.plane ? opts.plane.id : null, mass: sp.toMass, prevAgl: null, ghReal: null, ghAt: 0,
-      gref: null, aCmd: null, qCmd: 0, aTrim: null, deep: false, limiter: s.limiterPref !== false, p: 0, stalled: false, stallAmt: 0, buffet: 0, drop: 0, athr: sp.athr, spdSel: null, athrN1: null, iasPrev: null, iasAcc: 0, menu: false, lvrClb: false, sway: { p: 0, pv: 0, r: 0, rv: 0 }, vPrev: null,
+      gref: null, aCmd: null, qCmd: 0, aTrim: null, deep: false, limiter: s.limiterPref !== false, p: 0, stalled: false, stallAmt: 0, buffet: 0, drop: 0, athr: sp.athr, spdSel: null, athrN1: null, iasPrev: null, iasAcc: 0, menu: false, lvrClb: false, sway: { p: 0, pv: 0, r: 0, rv: 0 }, vPrev: null, wind: null, track: null, gsMs: null,
+      dmg: noDamage(), pieces: [], tumble: null, wreck: null, gone: false, flut: 0, overT: 0, dmgRoll: 0, ailAuth: 1,
     });
     s.msgs = [];
     const e = opts.end;
@@ -417,7 +418,8 @@
       pts = [[s.lat, s.lon]];
     } else if (opts.mode === 'final') {
       s.mode = 'final';
-      const [lat, lon] = offset(e.lat, e.lon, e.course + 180, sp.finalNm * 1852); // on the centre line
+      s.finalNm = opts.finalNm > 0 ? opts.finalNm : sp.finalNm; // (the start screen can pick another distance)
+      const [lat, lon] = offset(e.lat, e.lon, e.course + 180, s.finalNm * 1852); // on the centre line
       const fixed = sp.gear === 'fixed';
       Object.assign(s, { lat, lon, psi: e.course, V: (sp.finalKt + 15) * KT, onGround: false, conf: sp.finalConf, flapPos: sp.finalConf,
         gearDown: fixed, gear: fixed ? 1 : 0, lever: 0.86, gamma: -3 * DEG, mass: s.spec.landMass });
@@ -439,7 +441,7 @@
       if (s.mode === 'final') {
         const thr = h[0] ?? 0;
         e.h = thr;
-        s.h = thr + 15 + Math.tan(3 * DEG) * sp.finalNm * 1852;
+        s.h = thr + 15 + Math.tan(3 * DEG) * s.finalNm * 1852;
         s.groundH = h[1] ?? thr;
       } else if (s.mode === 'runway') {
         s.h = s.groundH = h[0] ?? 0;
@@ -455,7 +457,7 @@
     go();
     const flapsTxt = CONF.length > 1 ? `Flaps ${CONF[sp.toConf].name}. ` : '';
     say(s.mode === 'runway' ? `${sp.name}, lined up on runway ${e.name} at ${e.code}. ${flapsTxt}Throttle up (4 = ${DETENTS[3].name}), pull ↓ at ${sp.vr} kt.`
-      : s.mode === 'final' ? `${sp.finalNm} NM final for runway ${e.code} ${e.name}, ${sp.name}. ${sp.gear === 'fixed' ? '' : 'Gear (G), '}${CONF.length > 1 ? 'flaps (F), ' : ''}about ${sp.finalKt} kt, follow the ILS.` : 'You have control.', 'info', 7000);
+      : s.mode === 'final' ? `${s.finalNm} NM final for runway ${e.code} ${e.name}, ${sp.name}. ${sp.gear === 'fixed' ? '' : 'Gear (G), '}${CONF.length > 1 ? 'flaps (F), ' : ''}about ${sp.finalKt} kt, follow the ILS.` : 'You have control.', 'info', 7000);
     if (s.mode === 'air') speak('You have control');
     if (FG.fmgc) FG.fmgc.begin(opts);
   }
@@ -476,7 +478,7 @@
   // Z keeps the flight as it is now; Backspace puts it back there (paused, P to go on), as often as it takes.
   const CK = ['lat', 'lon', 'h', 'groundH', 'V', 'gamma', 'psi', 'theta', 'phi', 'alpha', 'onGround', 'landed', 'n1', 'lever',
     'rev', 'revOk', 'gearDown', 'gear', 'conf', 'flapPos', 'sb', 'gs', 'armed', 'brake', 'parking', 'afloor', 'tail', 'mass',
-    'gref', 'aCmd', 'qCmd', 'aTrim', 'deep', 'limiter', 'p', 'trimStart', 'stalled', 'stallAmt', 'buffet', 'drop', 'athr', 'spdSel', 'athrN1', 'iasPrev', 'iasAcc', 'lvrClb', 'sway', 'vPrev', 'ghReal', 'calls', 'prevAgl', 'machSel', 'athrMode'];
+    'gref', 'aCmd', 'qCmd', 'aTrim', 'deep', 'limiter', 'p', 'trimStart', 'stalled', 'stallAmt', 'buffet', 'drop', 'athr', 'spdSel', 'athrN1', 'iasPrev', 'iasAcc', 'lvrClb', 'sway', 'vPrev', 'ghReal', 'calls', 'prevAgl', 'dmg', 'pieces', 'tumble', 'wreck', 'gone', 'flut', 'overT', 'dmgRoll', 'ailAuth', 'machSel', 'athrMode'];
   function saveCheckpoint() {
     if (s.loading || s.crashed) { say('No checkpoint while crashed', 'amber', 2000); return; }
     const st = {};
@@ -629,7 +631,18 @@
   }
 
   // ---------- physics ----------
+  // The wind where the plane is (G.windAt: the game's weather and any wind placed there), asked once a second.
+  function windNow() {
+    const now = performance.now();
+    if (!s.wind || now - s.wind.at > 1000) {
+      const t = FG.ui && FG.ui.time != null ? FG.ui.time : G.state.time;
+      const w = G.windAt ? G.windAt(s.lat, s.lon, t, s.h / FT) : null;
+      s.wind = { from: w ? w.from : 0, kt: w ? w.kt : 0, gusty: !!(w && w.gusty), at: now };
+    }
+    return s.wind;
+  }
   function physics(dt) {
+    if (s.tumble) { tumbleStep(dt); return; }
     const sp = s.spec, m = s.mass, W = m * G0;
     const at = atmo(s.h);
     const V = Math.max(0, s.V);
@@ -671,8 +684,10 @@
         const up = (n < 45 ? 3 + (n - IDLE_N1) * 0.35 : 12) * sp.spool;
         s.n1[i] = clamp(n + clamp(diff * (diff > 0 ? 0.9 : 1.2) * sp.spool, -15 * sp.spool, up) * dt, IDLE_N1 - 1, 101);
       }
+      if (s.dmg.engOut.includes(i)) s.n1[i] = 0; // (it went with the wing)
       fr += thrustFrac(s.n1[i]);
     }
+    s.thrFrac = fr / s.n1.length;
     let T = engineThrust(sp, at.rho, V, M) * fr;
     T *= 1 - (1 + sp.rev) * s.rev; // (reversed: part of it backwards)
     // ground spoilers: up on the ground with the thrust levers at idle (armed, or in reverse) after touchdown, and
@@ -700,7 +715,16 @@
     // (far past the stall it still lifts as a flat plate does: most at 45°)
     if (!sp.delta && s.alpha > aStall) CL = Math.max(CL, 0.9 * Math.sin(2 * s.alpha * DEG));
     CL -= 0.45 * spoil;
-    const CD = CD0 + c.cd + sp.gearCd * s.gear + 0.05 * spoil + K_IND * Math.pow(CL - sp.kMin, 2) + waveDrag(sp, M) + 0.2 * s.stallAmt
+    // broken off: a wing that ends short lifts less (its share of an elliptical spread of lift), and the lift that is
+    // left on the other side rolls it towards the broken one (lift lost × how far out it acted); with flaps out more
+    // of the lift is inboard. The ailerons that went with a wing tip don't roll it any more (ailAuth).
+    const dm = s.dmg;
+    const lostL = lostLift(dm.cut[0]), lostR = lostLift(dm.cut[1]);
+    const CLw = Math.max(0, CL - 0.8 * c.cl0);
+    s.dmgRoll = ((lostR * lostArm(dm.cut[1]) - lostL * lostArm(dm.cut[0])) * CLw / 4) / CL_AIL; // (in full aileron throws)
+    s.ailAuth = (ailLeft(dm.cut[0]) + ailLeft(dm.cut[1])) / 2;
+    CL *= 1 - (lostL + lostR) / 2;
+    const CD = CD0 + c.cd + 0.012 * ((dm.cut[0] ? 1 : 0) + (dm.cut[1] ? 1 : 0)) + sp.gearCd * s.gear + 0.05 * spoil + K_IND * Math.pow(CL - sp.kMin, 2) + waveDrag(sp, M) + 0.2 * s.stallAmt
       // (past the stall the wing is more and more a flat plate across the air: a huge air brake at 30-40°)
       + (sp.delta ? 0 : 1.8 * Math.max(0, Math.sin(s.alpha * DEG) ** 2 - Math.sin(aStall * DEG) ** 2));
     // buffet: the airframe shakes as the flow starts to break away, hard once stalled (looks only: pose())
@@ -721,14 +745,13 @@
       s.V += ((T * Math.cos(s.alpha * DEG) - D) / m - G0 * Math.sin(s.gamma)) * dt;
       s.gamma += (((L + Ty) * cphi) / (m * Vs) - (G0 * cg) / Vs) * dt;
       s.gamma = clamp(s.gamma, -80 * DEG, 80 * DEG);
-      psiRate = (((L + Ty) * Math.sin(s.phi * DEG)) / (m * Vs * Math.max(0.2, cg))) / DEG + s.rud * 1.5;
+      psiRate = (((L + Ty) * Math.sin(s.phi * DEG)) / (m * Vs * Math.max(0.2, cg))) / DEG + s.rud * 1.5 * (s.dmg.rud ? 0 : 1);
       rollLaw(dt);
       // the nose is alpha above the path in the aircraft's own up direction: banked, part of it is sideways
       s.theta = s.gamma / DEG + s.alpha * Math.cos(s.phi * DEG);
       // the airframe: past 1.5 × its limit load the wings fail; far past its dive speed (VD, about VMO + 50 kt /
       // MMO + 0.07) flutter breaks it up
-      if (s.load > sp.gLimit * 1.5 || s.load < -1.5) { breakUp(`Overstressed at ${s.load.toFixed(1)} g: the wings failed`); return; }
-      if (ias() > VMO + 90 || M > MMO + 0.12) { breakUp(`Far past its dive speed (${Math.round(ias())} kt, M ${M.toFixed(2)}): flutter broke it up`); return; }
+      if (structure(dt, M)) return;
       // alpha floor: TOGA by itself near the stall (away from the ground)
       if (airbus() && isAirbus() && !s.afloor && s.alpha > s.aProt - 0.3 && agl() > 100) { s.afloor = true; say('A.FLOOR — TOGA', 'amber', 4000); }
     } else {
@@ -739,8 +762,9 @@
       const vRot = sp.vr * KT;
       const auth = clamp(q / (0.5 * 1.225 * vRot * vRot * 0.9), 0, 1);
       const liftFrac = clamp(L / W, 0, 1);
-      let rate = s.stick > 0 ? s.stick * 3.5 * auth : s.stick * 2 * auth;
-      rate -= (1 + 2 * (1 - liftFrac)) * (1 - clamp(s.stick, 0, 1));
+      const stk = s.dmg.elev ? 0 : s.stick; // (a jammed or lost elevator can't lift the nose: no rotation)
+      let rate = stk > 0 ? stk * 3.5 * auth : stk * 2 * auth;
+      rate -= (1 + 2 * (1 - liftFrac)) * (1 - clamp(stk, 0, 1));
       s.theta = clamp(s.theta + rate * dt, 0, sp.tail + 4);
       s.qCmd = s.theta > 0 && s.theta < sp.tail + 4 ? rate : 0; // (still rotating as it lifts off: the nose goes on coming up)
       s.alpha = s.theta;
@@ -764,9 +788,19 @@
     s.psi = wrap360(s.psi + psiRate * dt);
     sway(dt, psiRate);
     s.h += s.V * Math.sin(s.gamma) * dt;
-    const run = s.V * Math.cos(s.gamma) * dt;
-    s.lat += (run * Math.cos(s.psi * DEG)) / R_E / DEG;
-    s.lon += (run * Math.sin(s.psi * DEG)) / (R_E * Math.cos(s.lat * DEG)) / DEG;
+    // The air moves with the wind (the game's weather, or what the start screen set): in the air the plane drifts
+    // with it, so it crabs into a crosswind and a headwind slows it over the ground. It comes in over the first
+    // 100 ft (the wind gradient), so nothing jumps at lift-off; on the wheels the tyres hold it.
+    const w = windNow();
+    const inAir = s.onGround ? 0 : clamp((s.h - s.groundH) / (100 * FT), 0, 1);
+    const wv = w.kt * KT * inAir; // (m/s, blowing towards from + 180)
+    const run = s.V * Math.cos(s.gamma);
+    const vN = run * Math.cos(s.psi * DEG) - wv * Math.cos(w.from * DEG);
+    const vE = run * Math.sin(s.psi * DEG) - wv * Math.sin(w.from * DEG);
+    s.gsMs = Math.hypot(vN, vE);
+    s.track = s.gsMs > 1 ? wrap360(Math.atan2(vE, vN) / DEG) : s.psi;
+    s.lat += (vN * dt) / R_E / DEG;
+    s.lon += (vE * dt) / (R_E * Math.cos(s.lat * DEG)) / DEG;
     if (!s.onGround && s.h <= s.groundH) touchdown();
     if (s.onGround) s.h = s.groundH;
   }
@@ -794,15 +828,18 @@
     if (s.aTrim == null) s.aTrim = s.aCmd;
     s.trimStart = false;
     const auth = clamp(q / (0.5 * 1.225 * (sp.vr * KT * 1.3) ** 2), 0.3, 1.4) * (s.deep ? 0.2 : 1);
+    // a jammed or lost elevator doesn't answer the stick at all (elevPitch: what's left to pitch it with)
+    const stick = s.dmg.elev ? 0 : s.stick;
     // the elevator starts and stops the nose at the aircraft's own pace (its inertia)
-    s.qCmd += (s.stick * sp.pitchRate * auth - s.qCmd) * (1 - Math.exp(-dt / (sp.inertia * 0.6)));
+    s.qCmd += (stick * sp.pitchRate * auth - s.qCmd) * (1 - Math.exp(-dt / (sp.inertia * 0.6)));
     s.aCmd += s.qCmd * dt;
-    const held = Math.abs(s.stick) > 0.05;
+    const held = Math.abs(stick) > 0.05;
     if (held) s.aTrim += (s.aCmd - s.aTrim) * (1 - Math.exp(-dt / 2)); // (trimming the force away)
     else s.aCmd += (s.aTrim - s.aCmd) * (1 - Math.exp(-dt / 1.2)); // (the stick springs back to the trim)
     // the trim switches (Home / End, U / J): the trim itself, 1° of angle of attack a second; the nose follows
-    const trimIn = (held_('End', 'j') ? 1 : 0) - (held_('Home', 'u') ? 1 : 0);
-    if (trimIn) { s.aTrim += trimIn * dt; if (!held) s.aCmd += trimIn * dt; }
+    const trimIn = s.dmg.elev === 2 ? 0 : (held_('End', 'j') ? 1 : 0) - (held_('Home', 'u') ? 1 : 0);
+    if (trimIn) { s.aTrim += trimIn * dt * (s.dmg.elev ? 0.4 : 1); if (!held) s.aCmd += trimIn * dt * (s.dmg.elev ? 0.4 : 1); }
+    if (s.dmg.elev) elevPitch(dt);
     const prot = lim();
     if (prot && sp.softProt) {
       s.aTrim = Math.min(s.aTrim, s.aProt - 0.5, alphaFor(1) + 4);
@@ -828,7 +865,9 @@
     const gdot = s.gPrev == null ? 0 : (s.gamma - s.gPrev) / DEG / Math.max(1e-3, dt);
     const vdot = s.vLaw == null ? 0 : (s.V - s.vLaw) / Math.max(1e-3, dt);
     s.gPrev = s.gamma; s.vLaw = s.V;
-    s.alpha += (s.aCmd - 0.8 * clamp(gdot, -3, 3) + 0.1 * clamp(vdot, -5, 5) - s.alpha) * (1 - Math.exp(-dt / sp.aTau));
+    // (the elevator gone, the tailplane alone damps the swing: less)
+    const damp = s.dmg.elev === 2 ? 0.45 : 0.8;
+    s.alpha += (s.aCmd - damp * clamp(gdot, -3, 3) + 0.1 * clamp(vdot, -5, 5) - s.alpha) * (1 - Math.exp(-dt / sp.aTau));
   }
 
   // Airbus normal law. The stick moves the flight path the aircraft is asked to fly (gref), up to 3°/s at full; the
@@ -864,18 +903,33 @@
     if (s.stalled) rate *= 0.35; // (stalled: the ailerons hardly answer)
     // the roll rate wanted; the aircraft gets into it and out of it at its own pace (s.p, its inertia)
     let want = 0;
-    if (Math.abs(s.roll) > 0.02) want = s.roll * rate;
+    if (Math.abs(s.roll) > 0.02) want = s.roll * rate * (airbus() ? 1 : s.ailAuth);
     else if (airbus() && Math.abs(s.phi) > 33) want = -Math.sign(s.phi) * Math.min(5, (Math.abs(s.phi) - 33) * 2);
     else if (s.spec.softProt && lim() && Math.abs(s.phi) > 35) want = -Math.sign(s.phi) * Math.min(3, (Math.abs(s.phi) - 30) * 0.6); // (777: back to 30°)
     else if (sp.dihedral && !s.stalled) want = -Math.sign(s.phi) * Math.min(sp.dihedral, Math.abs(s.phi) * 0.5);
     // (stalled, a wing drops: a sudden roll that runs out at 25°, 45° on the classics, unless the stall goes on deeper)
     if (s.stalled) want += s.drop * clamp(1 - (s.phi * Math.sign(s.drop)) / (s.spec.law === 'classic' ? 45 : 25), 0, 1);
-    want += s.rud * 2;
+    want += s.rud * 2 * (s.dmg.rud ? 0 : 1);
+    // a broken wing rolls it (dmgRoll, in full aileron throws): fly-by-wire holds what it asks for as long as the
+    // ailerons that are left can; by hand it takes the stick held over (and more as it slows, the lift moving out)
+    if (s.dmgRoll) {
+      if (airbus()) {
+        const ail = clamp(want / rate - s.dmgRoll, -s.ailAuth, s.ailAuth);
+        want = (ail + s.dmgRoll) * rate;
+      } else want += s.dmgRoll * rate;
+    }
     const tau = sp.inertia * (airbus() ? 0.4 : 0.6);
     s.p += (want - s.p) * (1 - Math.exp(-dt / tau));
     s.phi += s.p * dt;
     const most = airbus() ? 67 : 75;
-    if (Math.abs(s.phi) > most) { s.phi = Math.sign(s.phi) * most; s.p = 0; }
+    if (Math.abs(s.phi) > most) {
+      // half a wing gone and more roll than the ailerons can hold: it rolls on over and goes out of control
+      if (Math.abs(s.dmgRoll) > s.ailAuth * 0.8 && Math.sign(s.phi) === Math.sign(s.dmgRoll) && Math.abs(s.phi) > 85) {
+        startTumble(`It rolled over with ${s.dmg.cut[0] && s.dmg.cut[1] ? 'both wings' : `the ${s.dmgRoll > 0 ? 'right' : 'left'} wing`} broken`);
+        return;
+      }
+      if (!s.dmgRoll || Math.abs(s.phi) > 89) { s.phi = Math.sign(s.phi) * Math.min(Math.abs(s.phi), s.dmgRoll ? 89 : most); s.p = 0; }
+    }
   }
 
   // On its legs the aircraft sways on the shock absorbers (drawn only: the physics keep the wheels on the runway):
@@ -894,9 +948,253 @@
     w.rv += (k * (rT - w.r) - c * w.rv) * dt; w.r += w.rv * dt;
   }
 
-  function breakUp(why) {
-    s.crashed = why; s.V = 0; s.lever = 0; s.n1 = s.n1.map(() => IDLE_N1);
+  function breakUp(why) { crash(why, { slide: false }); }
+
+  // ---------- damage: parts breaking off ----------
+  // A wing breaks across its span (the flightgame's js/livery.js PARTS: the tip beyond 0.8 half spans, past the
+  // ailerons' outer half; the outer wing beyond 0.5, outboard of a twin's engines, the outer engine of a four-engined
+  // one with it); the elevators flutter off, the rudder goes, or the elevator jams. Each part that comes off falls on
+  // its own (s.pieces) and the 3D view draws it, with the aircraft without it.
+  const PART_TIP = 0.8, PART_WING = 0.5;
+  const CL_AIL = 0.045; // rolling moment (per q·S·span) of the ailerons at full throw
+  function noDamage() { return { cut: [0, 0], elev: 0, elevOff: 0, rud: 0, engOut: [], thrPrev: null }; }
+  // the share of a half wing's lift beyond a break at `cut` half spans (an elliptical spread of lift), and how far out
+  // (in half spans) it acted on average
+  function lostLift(cut) {
+    if (!cut) return 0;
+    return 1 - (2 / Math.PI) * (Math.asin(cut) + cut * Math.sqrt(1 - cut * cut));
+  }
+  function lostArm(cut) {
+    if (!cut) return 0;
+    return ((1 - cut * cut) ** 1.5 / 3) / ((Math.PI / 4) * lostLift(cut));
+  }
+  const ailLeft = (cut) => (cut ? clamp((cut - 0.6) / 0.4, 0, 1) : 1); // (the ailerons: 0.6 half spans out to the tip)
+  const sideName = (k) => (k < 0 ? 'left' : 'right');
+
+  // the airframe's limits: past 1.3 × its limit load a wing tip tears off, past 1.5 × (its ultimate load) a wing
+  // breaks, past 1.9 × both; past its dive speed (VD, about VMO + 50 kt / MMO + 0.07) it shakes, then flutter takes
+  // the elevators, then the ailerons and a wing tip, and far past it the wing. True when it can't fly on.
+  function structure(dt, M) {
+    const sp = s.spec, d = s.dmg, nz = s.load;
+    const over = nz >= 0 ? nz / sp.gLimit : -nz; // (-1 g is the limit pushing)
+    // (rolling, the wing going up meets the air at a steeper angle: it carries more, and breaks first)
+    const side = s.p > 3 ? -1 : s.p < -3 ? 1 : Math.random() < 0.5 ? -1 : 1;
+    if (over > 1.5) {
+      if (over > 1.9) {
+        breakOff('wing', side, null); breakOff('wing', -side, null);
+        startTumble(`Overstressed at ${nz.toFixed(1)} g: both wings broke off`);
+        return true;
+      }
+      breakOff('wing', side, `Overstressed at ${nz.toFixed(1)} g: the ${sideName(side)} wing broke off`);
+      return false;
+    }
+    if (over > 1.3) {
+      s.overT += dt;
+      if (s.overT > 0.4) breakOff('tip', side, `Overstressed at ${nz.toFixed(1)} g: the ${sideName(side)} wing tip tore off`);
+    } else s.overT = 0;
+    const kt = Math.max(ias() - VMO, (M - MMO) * 750); // (knots past VMO, or the Mach past MMO as about as many)
+    s.flut = kt > 45 ? s.flut + dt : Math.max(0, s.flut - dt);
+    if (kt > 30) s.buffet = Math.max(s.buffet, clamp((kt - 30) / 40, 0, 1));
+    if (s.flut > 2 && d.elev !== 2) breakOff('elev', 0, `Flutter at ${Math.round(ias())} kt: the elevators broke off`);
+    if (kt > 65 && s.flut > 3.5 && !d.cut[0] && !d.cut[1]) breakOff('tip', side, `Aileron flutter: the ${sideName(side)} wing tip broke off`);
+    if (kt > 90 && !d.cut.some((c) => c && c <= PART_WING)) breakOff('wing', side, `Far past its dive speed (${Math.round(ias())} kt, M ${M.toFixed(2)}): the ${sideName(side)} wing broke off`);
+    return !!s.tumble;
+  }
+
+  // Something breaks: 'tip' / 'wing' (side -1 left, 1 right), 'elev' (both elevators come off), 'jam' (the elevator
+  // is stuck where it is), 'rud' (the rudder comes off). `why` is shown; onGround: torn off on the runway. Returns
+  // whether anything new broke.
+  function breakOff(kind, side, why, onGround) {
+    const d = s.dmg, sp = s.spec;
+    const wasFbw = airbus();
+    if (kind === 'tip' || kind === 'wing') {
+      const i = side < 0 ? 0 : 1, cut = kind === 'tip' ? PART_TIP : PART_WING;
+      if (d.cut[i] && d.cut[i] <= cut) return false;
+      addPiece({ kind: 'wing', side, cut, out: d.cut[i] || 0 }, kind === 'tip' ? 28 : 45, onGround);
+      d.cut[i] = cut;
+      if (kind === 'wing' && sp.engines === 4 && !sp.delta) d.engOut.push(side < 0 ? 0 : 3);
+      // (both wings broken: nothing holds it up or steady any more)
+      if (d.cut[0] && d.cut[1] && d.cut[0] <= PART_WING && d.cut[1] <= PART_WING && !s.onGround) startTumble(why || 'Both wings broke off');
+    } else if (kind === 'elev') {
+      if (d.elev === 2) return false;
+      d.elev = 2; d.elevOff = 3;
+      addPiece({ kind: 'elev', side: -1 }, 26); addPiece({ kind: 'elev', side: 1 }, 26);
+    } else if (kind === 'jam') {
+      if (d.elev) return false;
+      d.elev = 1;
+    } else if (kind === 'rud') {
+      if (d.rud) return false;
+      d.rud = 1;
+      addPiece({ kind: 'rud', side: 0 }, 26);
+    } else return false;
+    // (the computers drop to direct law without an elevator: it flies on from where it is)
+    if (wasFbw && !airbus()) { s.aCmd = null; s.aTrim = null; s.gref = null; s.trimStart = false; s.afloor = false; }
+    if (FG.fmgc && FG.fmgc.disconnect) FG.fmgc.disconnect('damage');
+    if (why) say(why, 'red', 7000);
+    if (kind !== 'jam') speak('master warning');
+    return true;
+  }
+
+  // A part that came off: it flies on with the aircraft's speed and slows in the air as fast as its size and weight
+  // let it (vt: the speed it falls at, m/s), turning over and over, and lies where it lands. d: metres east, north, up
+  // from where it broke off; rot: radians turned about the vertical, the nose and the wing (js/view3d.js pilotPieces).
+  let pieceN = 0;
+  function addPiece(part, vt, onGround) {
+    const vh = s.V * Math.cos(s.gamma), psi = s.psi * DEG;
+    const v = [vh * Math.sin(psi), vh * Math.cos(psi), s.V * Math.sin(s.gamma)];
+    const rnd = (a) => (Math.random() * 2 - 1) * a;
+    const out = part.side || 0;
+    if (!onGround) {
+      // (a wing part kicks up with the lift it was carrying and out to its side)
+      v[0] += Math.cos(psi) * out * 3; v[1] -= Math.sin(psi) * out * 3; v[2] += part.kind === 'wing' ? 4 + Math.random() * 4 : 1;
+    }
+    const w = onGround ? [rnd(1.2), rnd(1.5), rnd(0.8)]
+      : part.kind === 'wing' ? [rnd(1.5), out * (3 + Math.random() * 4), rnd(4)] : [rnd(3), rnd(6), rnd(6)];
+    s.pieces.push({ id: `p${++pieceN}`, part, d: [0, 0, 0], v, rot: [0, 0, 0], w, vt, h0: s.h, g0: s.groundH, rest: false, age: 0 });
+    if (s.pieces.length > 12) s.pieces.shift();
+  }
+  function piecesStep(dt) {
+    for (const q of s.pieces) {
+      q.age += dt;
+      if (q.rest) continue;
+      const floor = q.g0 - q.h0; // (d up where it lies on the ground: the wheels' height where it broke off, js/view3d.js lays it flat)
+      const v = q.v;
+      if (q.d[2] <= floor + 0.01) {
+        // on the ground: it skids to a stop, lying flat
+        const vh = Math.hypot(v[0], v[1]);
+        const k = vh > 0 ? Math.max(0, vh - 0.8 * G0 * dt) / vh : 0;
+        v[0] *= k; v[1] *= k; v[2] = 0; q.d[2] = floor;
+        for (let i = 0; i < 3; i++) q.w[i] *= Math.exp(-dt / 0.4);
+        for (const i of [1, 2]) q.rot[i] += (Math.round(q.rot[i] / Math.PI) * Math.PI - q.rot[i]) * (1 - Math.exp(-dt / 0.25));
+        if (vh < 0.3 && Math.abs(q.w[0]) + Math.abs(q.w[1]) + Math.abs(q.w[2]) < 0.05) q.rest = true;
+      } else {
+        const V = Math.hypot(v[0], v[1], v[2]), k = G0 / (q.vt * q.vt);
+        v[0] -= k * V * v[0] * dt; v[1] -= k * V * v[1] * dt; v[2] -= (G0 + k * V * v[2]) * dt;
+        for (let i = 0; i < 3; i++) q.w[i] *= Math.exp(-dt / 40);
+      }
+      for (let i = 0; i < 3; i++) { q.d[i] += v[i] * dt; q.rot[i] += q.w[i] * dt; }
+      if (q.d[2] < floor) { q.d[2] = floor; v[2] = v[2] < -6 ? -v[2] * 0.15 : 0; } // (a small bounce as it hits)
+    }
+    s.pieces = s.pieces.filter((q) => q.age < 400);
+  }
+
+  // Out of control (a wing gone, rolled over): no longer the flight-path model but the airframe's own motion. The
+  // wing that's left rolls it on and on, the tail keeps the nose into the air (if it has one), the lift left turns it
+  // round a corkscrew, the broken airframe drags hard; the controls do nothing. It ends on the ground.
+  function startTumble(why) {
+    if (s.tumble) return;
+    const vh = s.V * Math.cos(s.gamma), psi = s.psi * DEG;
+    s.tumble = { why, v: [vh * Math.sin(psi), vh * Math.cos(psi), s.V * Math.sin(s.gamma)], hdg: s.psi, pitch: s.theta, bank: s.phi,
+      p: s.p, q: 0, r: 0, side: Math.sign(s.dmgRoll) || (Math.random() < 0.5 ? -1 : 1), t: 0 };
+    s.onGround = false;
+    if (FG.fmgc && FG.fmgc.disconnect) FG.fmgc.disconnect('damage');
+    say(`OUT OF CONTROL — ${why}`, 'red', 9000);
+  }
+  function tumbleStep(dt) {
+    const t = s.tumble, sp = s.spec, m = s.mass, d = s.dmg;
+    t.t += dt;
+    const at = atmo(s.h);
+    const v = t.v, V = Math.max(1, Math.hypot(v[0], v[1], v[2]));
+    const qd = 0.5 * at.rho * V * V, qn = qd / (0.5 * 1.225 * (sp.vr * KT) ** 2);
+    const h = t.hdg * DEG, p = t.pitch * DEG, b = t.bank * DEG;
+    const fwd = [Math.sin(h) * Math.cos(p), Math.cos(h) * Math.cos(p), Math.sin(p)];
+    const right = [Math.cos(h), -Math.sin(h), 0];
+    const up0 = [-Math.sin(h) * Math.sin(p), -Math.cos(h) * Math.sin(p), Math.cos(p)];
+    const top = up0.map((x, i) => x * Math.cos(b) + right[i] * Math.sin(b));
+    const vh = v.map((x) => x / V);
+    const dot = (a, c) => a[0] * c[0] + a[1] * c[1] + a[2] * c[2];
+    // angle of attack of what's left of the wing, its lift across the air along its up, the drag along the air
+    const alpha = Math.atan2(-dot(top, vh), dot(fwd, vh));
+    const left = 1 - (lostLift(d.cut[0]) + lostLift(d.cut[1])) / 2;
+    const CL = left * (Math.abs(alpha) < 15 * DEG ? clamp(CL_A * alpha / DEG, -1.2, 1.2) : 0.9 * Math.sin(2 * alpha));
+    const CD = 0.12 + 1.2 * Math.sin(alpha) ** 2;
+    const lperp = top.map((x, i) => x - dot(top, vh) * vh[i]);
+    const ln = Math.hypot(...lperp) || 1;
+    const fr = s.n1.reduce((x, n) => x + thrustFrac(n), 0);
+    const T = engineThrust(sp, at.rho, V, V / at.a) * fr;
+    for (let i = 0; i < 3; i++) v[i] += ((qd * sp.S * (CL * lperp[i] / ln - CD * vh[i]) + T * fwd[i]) / m - (i === 2 ? G0 : 0)) * dt;
+    s.load = (qd * sp.S * CL) / (m * G0);
+    // rolling: as fast as the lift left on one side rolls it (both wings gone: slowly, whichever way)
+    const both = d.cut[0] && d.cut[1];
+    const pT = t.side * (both ? 25 : clamp(40 + 220 * Math.abs(s.dmgRoll || 0.4) * qn, 40, 240));
+    t.p += (pT - t.p) * (1 - Math.exp(-dt / 1.2));
+    // the tail turns the nose into the air (less without the elevators), wobbling the harder the faster
+    const gv = Math.asin(clamp(v[2] / V, -1, 1)) / DEG, trk = Math.atan2(v[0], v[1]) / DEG;
+    const vane = d.elev === 2 ? 0.8 : 2.2;
+    const wob = 18 * Math.min(2, qn) * Math.sin(t.t * 2.7) + (d.elev === 2 ? 40 * Math.sin(t.t * 1.3 + 1) : 0);
+    t.q += ((gv - t.pitch) * vane + wob - t.q) * (1 - Math.exp(-dt / 0.5));
+    t.r += (wrap180(trk - t.hdg) * vane - t.r) * (1 - Math.exp(-dt / 0.6));
+    t.bank = wrap180(t.bank + t.p * dt);
+    t.pitch = clamp(t.pitch + t.q * dt, -89, 89);
+    t.hdg = wrap360(t.hdg + t.r * dt);
+    // where it goes
+    s.h += v[2] * dt;
+    s.lat += (v[1] * dt) / R_E / DEG;
+    s.lon += (v[0] * dt) / (R_E * Math.cos(s.lat * DEG)) / DEG;
+    s.V = V; s.gamma = gv * DEG; s.psi = wrap360(trk); s.phi = t.bank; s.theta = t.pitch; s.alpha = alpha / DEG;
+    if (s.h <= s.groundH) {
+      s.h = s.groundH;
+      crash(`${t.why}: it hit the ground at ${Math.round(V / KT)} kt`, { slide: false });
+    }
+  }
+
+  // The end: a fireball where it hits (the game's crash blasts, in real time: js/view3d.js updateBlasts); flown into
+  // the ground fast, nothing is left to draw (s.gone); landed too hard or with a wing dug in, the wreck slides on and
+  // slews round (s.wreck, slide: true; spin °/s), the broken parts lying about.
+  function crash(why, o = {}) {
+    if (s.crashed) return;
+    const tu = s.tumble;
+    const V = tu ? Math.hypot(...tu.v) : s.V;
+    const vz = tu ? tu.v[2] : s.V * Math.sin(s.gamma);
+    s.crashed = why;
+    if ((V > 40 || -vz > 10) && G.blasts) {
+      G.blasts.push({ id: 'fly', lat: s.lat, lon: s.lon, altM: s.groundH, real: true });
+      if (G.blasts.length > 10) G.blasts.shift();
+    }
+    s.gone = !o.slide && (V > 80 || -vz > 35);
+    s.wreck = o.slide && V > 3 ? { v: V * Math.cos(s.gamma), trk: s.psi, hdg: s.psi, spin: o.spin || 0, bank: s.phi, pitch: s.theta,
+      side: Math.sign(s.phi) || 1, dug: Math.abs(o.spin || 0) > 60 } : null;
+    s.tumble = null;
+    s.V = 0; s.lever = 0; s.n1 = s.n1.map(() => IDLE_N1);
     speak('crash');
+  }
+  function wreckStep(dt) {
+    const w = s.wreck;
+    if (w.v <= 0) return;
+    w.v = Math.max(0, w.v - 0.45 * G0 * dt); // (on its belly, or a stub of wing: hard)
+    w.hdg = wrap360(w.hdg + w.spin * dt);
+    w.spin *= Math.exp(-dt / 2.5);
+    // it settles: level on its belly, or down on the side whose wing broke
+    w.bank += ((w.dug ? w.side * 14 : 0) - w.bank) * (1 - Math.exp(-dt / 0.6));
+    w.pitch += (-1 - w.pitch) * (1 - Math.exp(-dt / 0.6));
+    const run = w.v * dt, tr = w.trk * DEG;
+    s.lat += (run * Math.cos(tr)) / R_E / DEG;
+    s.lon += (run * Math.sin(tr)) / (R_E * Math.cos(s.lat * DEG)) / DEG;
+    s.h = s.groundH;
+  }
+  // what's broken, for the warnings
+  function damageWarnings(w) {
+    const d = s.dmg;
+    if (s.tumble) { w.push(['OUT OF CONTROL', 'red']); return; }
+    for (const i of [0, 1]) {
+      if (!d.cut[i]) continue;
+      const nm = i ? 'R' : 'L';
+      w.push([d.cut[i] <= PART_WING ? `${nm} WING LOST` : `${nm} WING TIP LOST — hold ${i ? 'left' : 'right'} roll`, 'red']);
+    }
+    if (d.engOut.length) w.push([`ENG ${d.engOut.map((e) => e + 1).join(' + ')} LOST`, 'red']);
+    if (d.elev === 1) w.push(['F/CTL ELEV JAM — pitch with the trim (Home / End) and thrust', 'red']);
+    if (d.elev === 2) w.push(['F/CTL ELEV LOST — no pitch control: thrust up to climb, back to descend', 'red']);
+    if (d.rud) w.push(['F/CTL RUDDER LOST', 'amber']);
+  }
+  // with the elevator jammed or gone, the engines below the wing pitch it: more thrust pushes the nose up (about 3° of
+  // angle of attack from idle to full), as a working elevator would have held; without an elevator the nose wanders too.
+  // It's all there is to pitch with: as the crews of United 232 and DHL's A300 over Baghdad flew theirs.
+  function elevPitch(dt) {
+    const d = s.dmg, fr = s.thrFrac || 0;
+    if (d.thrPrev == null) d.thrPrev = fr;
+    s.aTrim += 3 * (fr - d.thrPrev);
+    d.thrPrev = fr;
+    if (d.elev === 2) s.aTrim += (Math.random() - 0.5) * 1.2 * dt;
   }
   function touchdown() {
     const vs = s.V * Math.sin(s.gamma);
@@ -904,17 +1202,25 @@
     s.h = s.groundH;
     s.onGround = true;
     s.gamma = 0;
-    let crash = null;
+    let why = null;
     const sp = s.spec;
-    if (s.gear < 0.99) crash = s.gear < 0.1 ? 'Gear-up landing' : 'The gear was not down and locked';
-    else if (fpm < -sp.crashFpm) crash = `Hit the ground at ${Math.round(-fpm)} ft/min`;
-    else if (Math.abs(s.phi) > sp.tipBank) crash = sp.engine === 'piston' ? 'A wing tip hit the ground' : 'A wing tip and an engine hit the ground';
-    else if (s.theta < -2.5) crash = sp.tailwheel ? 'Nosed over: the propellers hit the runway' : 'Nose wheel first: the nose gear collapsed';
-    else if (s.V > sp.tyreKt * KT) crash = 'Far too fast for the tyres';
-    if (crash) {
-      s.crashed = crash; s.V = 0; s.lever = 0; s.n1 = s.n1.map(() => IDLE_N1);
-      speak('crash');
+    const side = s.phi > 0 ? 1 : -1, sideName = side > 0 ? 'right' : 'left';
+    let dig = false; // (a wing dug in: it breaks off and the wreck slews round towards it)
+    if (fpm < -sp.crashFpm * 2.5) why = `Hit the ground at ${Math.round(-fpm)} ft/min`;
+    else if (Math.abs(s.phi) > sp.tipBank + 5) { why = `The ${sideName} wing dug in at ${Math.round(Math.abs(s.phi))}° of bank and broke off: it cartwheeled`; dig = true; }
+    else if (s.gear < 0.99) why = s.gear < 0.1 ? 'Gear-up landing' : 'The gear was not down and locked';
+    else if (fpm < -sp.crashFpm) why = `Hit the ground at ${Math.round(-fpm)} ft/min`;
+    else if (Math.abs(s.phi) > sp.tipBank && sp.engine !== 'piston' && Math.abs(s.phi) > sp.tipBank + 2 && s.spec.engines >= 4) why = 'A wing tip and an engine hit the ground';
+    else if (s.theta < -2.5) why = sp.tailwheel ? 'Nosed over: the propellers hit the runway' : 'Nose wheel first: the nose gear collapsed';
+    else if (s.V > sp.tyreKt * KT) why = 'Far too fast for the tyres';
+    if (why) {
+      if (dig) breakOff('wing', side, null, true);
+      crash(why, { slide: true, spin: dig ? side * (90 + 60 * Math.random()) : (Math.random() - 0.5) * 30, hard: -fpm });
       return;
+    }
+    // a wing tip that touches the runway (a little past the bank it clears) is torn off; the rest of it lands
+    if (Math.abs(s.phi) > sp.tipBank && !s.dmg.cut[side > 0 ? 1 : 0]) {
+      breakOff('tip', side, `Wing strike: the ${sideName} wing tip broke off on the runway`, true);
     }
     s.landed = true;
     const r = -fpm;
@@ -950,6 +1256,7 @@
       } else if (s.stalled) w.push(['STALL — stick forward, power up', 'red']);
       else if ((s.spec.shaker || isFbw()) && s.alpha > s.aProt) w.push([isFbw() ? 'STALL WARNING' : 'STICK SHAKER', 'red']);
       if (!s.onGround && s.load > s.spec.gLimit + 0.05) w.push([`OVERSTRESS ${s.load.toFixed(1)} g`, 'red']);
+      damageWarnings(w);
       if (s.deep) w.push(['DEEP STALL — full nose down', 'red']);
       const sinking = vs < 0 ? a / (-vs / 60) : Infinity; // seconds to the ground
       const landing = s.gear > 0.99 && s.conf >= Math.min(s.spec.finalConf, lastConf());
@@ -998,6 +1305,8 @@
       if (Math.abs(gh - s.groundH) > 60 && !s.onGround) s.groundH = gh;
       else s.groundH += (gh - s.groundH) * (1 - Math.exp(-dtAll / 0.25));
     }
+    if (!s.paused && !s.menu) piecesStep(Math.min(dtAll, 0.1));
+    if (!s.paused && !s.menu && s.crashed && s.wreck) wreckStep(Math.min(dtAll, 0.1));
     if (!s.paused && !s.menu && !s.crashed) {
       inputs(dtAll);
       let left = Math.min(dtAll, 0.25);
@@ -1017,9 +1326,16 @@
     const tb = performance.now() / 1000, bf = s.paused || s.menu || s.crashed ? 0 : s.buffet;
     const shakeP = bf * (0.5 * Math.sin(tb * 37) + 0.3 * Math.sin(tb * 23 + 1.3));
     const shakeR = bf * (0.6 * Math.sin(tb * 29 + 0.7) + 0.4 * Math.sin(tb * 17 + 2.1));
+    const tu = s.tumble, wr = s.wreck;
     return {
-      lat: s.lat, lon: s.lon, altM: a, altMSL: s.h, heading: wrap360(s.psi + (s.onGround ? 0 : s.alpha * Math.sin(s.phi * DEG))), bank: s.phi + s.sway.r + shakeR, pitch: s.theta + s.sway.p + shakeP, flying: true,
-      st: { phase, speedKmh: kmh, altFt: s.h / FT, fieldFt: s.groundH / FT, ground: s.onGround, windKt: 0, windFrom: 0, gusty: false, airFrac: 0 },
+      lat: s.lat, lon: s.lon, altM: a, altMSL: s.h,
+      heading: tu ? wrap360(tu.hdg) : wr ? wrap360(wr.hdg) : wrap360(s.psi + (s.onGround ? 0 : s.alpha * Math.sin(s.phi * DEG))),
+      bank: tu ? tu.bank : wr ? wr.bank : s.phi + s.sway.r + shakeR, pitch: tu ? tu.pitch : wr ? wr.pitch : s.theta + s.sway.p + shakeP, flying: true,
+      // what broke off (js/view3d.js drawPilot, js/livery.js PARTS) and the parts falling away or lying about
+      dmg: { cut: s.dmg.cut, elev: s.dmg.elevOff, rud: s.dmg.rud ? 1 : 0 },
+      pieces: s.pieces.map((q) => ({ id: q.id, part: q.part, d: q.d, rot: q.rot, age: q.age, down: q.d[2] <= q.g0 - q.h0 + 0.05 })),
+      gone: s.gone, // (destroyed on impact: nothing left to draw)
+      st: { phase, speedKmh: kmh, altFt: s.h / FT, fieldFt: s.groundH / FT, ground: s.onGround, windKt: s.wind ? s.wind.kt : 0, windFrom: s.wind ? s.wind.from : 0, gusty: !!(s.wind && s.wind.gusty), airFrac: 0 },
       pilot: { gear: s.gear, flap: confAt(s.flapPos).flap, ail: s.roll, elev: s.onGround ? s.stick : s.stick * 0.7, rud: s.onGround ? s.rud : s.rud, rev: s.rev, n1: s.n1.reduce((x, y) => x + y, 0) / s.n1.length, gamma: s.gamma / DEG, vs,
         nz: (s.load || 0) + bf * 0.25 * Math.sin(tb * 13), stall: s.stallAmt || 0 },
     };
@@ -1431,9 +1747,10 @@
     // corners: GS / TAS, wind, ILS
     c.textAlign = 'left'; c.font = `600 ${Math.round(H * 0.045)}px system-ui, sans-serif`;
     c.fillStyle = '#e8eef8'; c.fillText('GS', W * 0.03, H * 0.06);
-    c.fillStyle = '#30d158'; c.fillText(String(Math.round(vn / KT)), W * 0.10, H * 0.06);
+    c.fillStyle = '#30d158'; c.fillText(String(Math.round((s.gsMs != null ? s.gsMs : vn) / KT)), W * 0.10, H * 0.06);
     c.fillStyle = '#e8eef8'; c.fillText('TAS', W * 0.22, H * 0.06);
     c.fillStyle = '#30d158'; c.fillText(String(Math.round(s.V / KT)), W * 0.31, H * 0.06);
+    if (s.wind && s.wind.kt > 0) { c.fillStyle = '#e8eef8'; c.fillText(`${String(Math.round(s.wind.from)).padStart(3, '0')}°/${Math.round(s.wind.kt)}`, W * 0.03, H * 0.12); }
     c.textAlign = 'right';
     if (il) {
       c.fillStyle = '#ff4fd8'; c.fillText(`ILS ${il.e.code} ${il.e.name}`, W * 0.97, H * 0.06);
@@ -1576,7 +1893,10 @@
         <button data-pm="ck-save"${s.crashed ? ' disabled' : ''}>⚑ Save a checkpoint here <kbd>Z</kbd></button>
         <button data-pm="restart">↺ Start this flight again <kbd>R</kbd></button>
         <button data-pm="leave">✕ Leave the cockpit <kbd>Q</kbd></button>
-      </div></div>`;
+      </div>
+      <h3 class="pm-sub">Failures (to practise)</h3>
+      <div class="pm-fails">${FAILS.map(([k, label]) => `<button data-fail="${k}"${s.crashed || s.tumble ? ' disabled' : ''}>${label}</button>`).join('')}</div>
+      </div>`;
     document.body.appendChild(el);
     el.addEventListener('click', (e) => {
       const b = e.target.closest('[data-pm]');
@@ -1585,10 +1905,24 @@
       else if (b && b.dataset.pm === 'leave') stop();
       else if (b && b.dataset.pm === 'ck-back') toCheckpoint();
       else if (b && b.dataset.pm === 'ck-save') { saveCheckpoint(); showMenu(false); }
+      const f = e.target.closest('[data-fail]');
+      if (f && !f.disabled) { fail(f.dataset.fail); showMenu(false); }
     });
+  }
+  // The failures menu: the same breakages a crash brings (breakOff), at once.
+  const FAILS = [['tipL', '✂ Left wing tip'], ['tipR', '✂ Right wing tip'], ['jam', '⛓ Elevator jams'], ['elev', '✂ Elevators break off'],
+    ['rud', '✂ Rudder breaks off'], ['wingL', '✂ Left wing breaks']];
+  function fail(k) {
+    const why = { tipL: 'The left wing tip broke off', tipR: 'The right wing tip broke off', jam: 'The elevator jammed: pitch with the trim and thrust',
+      elev: 'The elevators broke off: only thrust pitches it now', rud: 'The rudder broke off', wingL: 'The left wing broke off' }[k];
+    const done = k === 'tipL' ? breakOff('tip', -1, why, s.onGround) : k === 'tipR' ? breakOff('tip', 1, why, s.onGround)
+      : k === 'jam' ? breakOff('jam', 0, why) : k === 'elev' ? breakOff('elev', 0, why) : k === 'rud' ? breakOff('rud', 0, why)
+        : breakOff('wing', -1, why, s.onGround);
+    if (!done) say('That is broken already', 'info', 2000);
   }
   function openDialog(opts0 = {}) {
     if (s.active) return;
+    if (FG.flySelect) { FG.flySelect.open(opts0); return; } // (the start screen: src/select.js)
     if (!FG.view3d) { toast('The 3D view is not available here.'); return; }
     let el = document.getElementById('pilot-start');
     if (el) { el.remove(); return; }
@@ -1697,7 +2031,11 @@
     get LOOK_DOWN() { return lookDownOf(); },
     panel,
     types: TYPES,
-    open: openDialog, start, stop, step, pose, runwayEnds, bestEnd,
+    open: openDialog, start, stop, step, pose, fail, // (fail: a failure from the menu, by its key: FAILS)
+    runwayEnds, ends: runwayEnds, bestEnd, defaultAirport, // (for the start screen, src/select.js, and test/ap-test.js)
+    // for src/fmgc.js
+    api: { ias, atmo, agl, vsFpm, spdTarget, ils, offset, say, speak, athrOn, airbus, vls, detentName,
+      conf: () => CONF, vmo: () => VMO, mmo: () => MMO, idle: () => IDLE_N1, KT, FT, DEG }, runwayEnds, bestEnd,
     // for src/fmgc.js
     api: { ias, atmo, agl, vsFpm, spdTarget, ils, offset, say, speak, athrOn, airbus, vls, detentName,
       conf: () => CONF, vmo: () => VMO, mmo: () => MMO, idle: () => IDLE_N1, KT, FT, DEG },

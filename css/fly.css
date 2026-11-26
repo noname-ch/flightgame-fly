@@ -139,3 +139,74 @@ body.piloting .view3d-controls { display: none; }
 .pm-buttons button { display: flex; justify-content: space-between; align-items: center; gap: 14px; padding: 9px 12px; text-align: left; }
 .pm-buttons button:disabled { opacity: 0.45; cursor: default; }
 .pm-buttons kbd { flex-shrink: 0; font-size: 11px; opacity: 0.6; }
+.pm-sub { margin: 16px 0 0; font-size: 12px; font-weight: 600; opacity: 0.7; text-transform: uppercase; letter-spacing: 0.04em; }
+.pm-fails { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 8px; }
+.pm-fails button { padding: 7px 9px; font-size: 12px; text-align: left; }
+.pm-fails button:disabled { opacity: 0.45; cursor: default; }
+
+/* ---------- the start screen (src/select.js) ---------- */
+#pilot-start.fs { align-items: stretch; padding: 14px; }
+.fs-card {
+  width: min(1320px, 100%); margin: auto; max-height: calc(100vh - 28px); display: flex; flex-direction: column;
+  background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 14px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5); overflow: hidden;
+}
+.fs-head { display: flex; align-items: baseline; gap: 14px; padding: 14px 20px 10px; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+.fs-head h2 { margin: 0; font-size: 20px; }
+.fs-sub, .fs-muted { color: var(--muted); font-size: 12px; font-weight: 400; }
+.fs-back { margin-left: auto; color: #7fd4ff; text-decoration: none; font-size: 13px; }
+.fs-body { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr) minmax(240px, 0.7fr); gap: 18px; padding: 12px 20px; overflow: auto; min-height: 0; flex: 1; }
+.fs-body h3 { margin: 10px 0 6px; font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+.fs-body h3:first-child { margin-top: 0; }
+.fs-body h3 .fs-muted { text-transform: none; letter-spacing: 0; margin-left: 6px; }
+.fs-body input, .fs-body select { padding: 5px 8px; border: 1px solid var(--input-border); border-radius: 6px; background: var(--input-bg, rgba(0,0,0,0.25)); color: var(--text); font: inherit; }
+.fs-filter, .fs-chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 8px; }
+.fs-filter button, .fs-chips button { padding: 4px 10px; border-radius: 999px; border: 1px solid var(--border); background: transparent; color: var(--text); cursor: pointer; font-size: 12px; }
+.fs-filter button.on, .fs-chips button.on { background: #1f6feb; border-color: #1f6feb; color: #fff; }
+.fs-chips button:disabled { opacity: 0.4; cursor: default; }
+.fs-filter input { flex: 1; min-width: 120px; }
+.fs-gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
+.fs-plane {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 6px 8px 8px; text-align: left;
+  border: 1px solid var(--border); border-radius: 10px; background: rgba(255, 255, 255, 0.03); color: var(--text); cursor: pointer;
+}
+.fs-plane:hover { background: rgba(255, 255, 255, 0.07); }
+.fs-plane.on { border-color: #ffb000; box-shadow: 0 0 0 1px #ffb000 inset; background: rgba(255, 176, 0, 0.08); }
+.fs-plane img { width: 100%; aspect-ratio: 16 / 9; object-fit: contain; border-radius: 6px; background: rgba(0, 0, 0, 0.25); }
+.fs-plane b { font-size: 13px; margin-top: 2px; }
+.fs-plane span { font-size: 11px; color: var(--muted); }
+.fs-plane i { display: flex; gap: 4px; font-style: normal; min-height: 16px; }
+.fs-plane em, .fs-rw em { font-style: normal; font-size: 10px; padding: 1px 5px; border-radius: 4px; background: rgba(127, 212, 255, 0.15); color: #7fd4ff; }
+.fs-rw em.bad { background: rgba(255, 90, 90, 0.15); color: #ff8a8a; }
+.fs-blurb { font-size: 12px; color: var(--muted); margin: 8px 0 0; }
+.fs-ap { position: relative; display: flex; gap: 8px; align-items: center; }
+.fs-ap #ps-ap { width: 13em; }
+.fs-suggest { position: absolute; top: 100%; left: 0; z-index: 10; width: min(420px, 100%); margin-top: 2px; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4); overflow: hidden; }
+.fs-suggest button { display: flex; gap: 8px; width: 100%; padding: 6px 10px; border: 0; background: transparent; color: var(--text); text-align: left; cursor: pointer; font-size: 12px; }
+.fs-suggest button:hover, .fs-suggest button:first-child { background: rgba(255, 255, 255, 0.07); }
+.fs-suggest span { margin-left: auto; color: var(--muted); }
+.fs-map { height: 190px; margin: 8px 0; border-radius: 8px; border: 1px solid var(--border); background: #11161d; }
+.fs-rw { display: flex; flex-wrap: wrap; gap: 6px; }
+.fs-rw button { display: flex; gap: 6px; align-items: center; padding: 4px 8px; border-radius: 8px; border: 1px solid var(--border); background: transparent; color: var(--text); cursor: pointer; font-size: 12px; }
+.fs-rw button.on { border-color: #ffb000; background: rgba(255, 176, 0, 0.1); }
+.fs-rw span { color: var(--muted); }
+.fs-where.takeover .fs-ap, .fs-where.takeover .fs-map, .fs-where.takeover .fs-rw { opacity: 0.35; pointer-events: none; }
+.fs-modes { display: grid; gap: 6px; }
+.fs-mode { display: grid; grid-template-columns: auto 1fr; column-gap: 8px; align-items: center; padding: 6px 10px; border: 1px solid var(--border); border-radius: 8px; cursor: pointer; }
+.fs-mode span { grid-column: 2; font-size: 12px; color: var(--muted); }
+.fs-mode.on { border-color: #ffb000; background: rgba(255, 176, 0, 0.08); }
+.fs-mode.off { opacity: 0.5; cursor: default; }
+.fs-mode select { margin-left: 4px; padding: 2px 4px; font-size: 12px; max-width: 100%; }
+.fs-row { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 8px; font-size: 13px; align-items: center; }
+.fs-row input { width: 5.5em; }
+.fs-row #ps-to { text-transform: uppercase; }
+.fs-more select { width: 100%; }
+#fs-hour { width: 100%; }
+#fs-hour[hidden], #fs-windset[hidden] { display: none; }
+.fs-foot { display: flex; align-items: center; gap: 14px; padding: 10px 20px 14px; border-top: 1px solid var(--border); flex-wrap: wrap; }
+.fs-foot .ps-keys { flex: 1; margin: 0; }
+.fs-foot .ps-err { margin: 0; flex-basis: 100%; }
+.fs-foot .ps-err:empty { display: none; }
+.fs-foot .row { display: flex; gap: 8px; margin: 0 0 0 auto; }
+@media (max-width: 1000px) { .fs-body { grid-template-columns: 1fr 1fr; } .fs-planes { grid-column: 1 / -1; } }
+@media (max-width: 640px) { .fs-body { grid-template-columns: 1fr; } .fs-gallery { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); } }

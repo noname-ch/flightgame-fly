@@ -13,7 +13,7 @@ import path from 'node:path';
 import { spawn, execFileSync } from 'node:child_process';
 
 const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
-const MAX_RUN_MS = 5 * 60 * 1000;
+const MAX_RUN_MS = 9 * 60 * 1000;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const errors = [];
 const warnings = [];
@@ -46,7 +46,11 @@ function findChrome() {
 const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'fg-fly-smoke-'));
 const chrome = spawn(findChrome(), [
   '--headless=new', '--remote-debugging-port=0', `--user-data-dir=${profile}`, '--no-first-run',
-  '--no-sandbox', '--window-size=1400,900', '--use-angle=swiftshader', '--enable-unsafe-swiftshader',
+  '--no-sandbox', '--window-size=1400,900',
+  // on a desktop the real graphics chip (the hand-flown plane steps once a frame: software 3D draws about one a second
+  // and sometimes none for a minute); elsewhere (CI, SOFT3D=1) software
+  ...(!process.env.SOFT3D && (process.env.WAYLAND_DISPLAY || process.env.DISPLAY)
+    ? ['--enable-gpu', '--use-angle=gl-egl', '--ignore-gpu-blocklist'] : ['--use-angle=swiftshader', '--enable-unsafe-swiftshader']),
   '--autoplay-policy=no-user-gesture-required', // (the aircraft sounds start without a real click)
   '--mute-audio', // (... and are measured, not heard: the meter and spectrum still work)
   'about:blank',
@@ -125,6 +129,10 @@ handlers.push((msg) => {
         const text = p.args.map((a) => a.value ?? a.description ?? '').join(' ');
         // (a map tile that did not come is the network's fault, not ours)
         if (/AJAXError: .*https?:\/\/(?!127\.0\.0\.1)/.test(text)) { warnings.push(`map tile: ${text.split('\n')[0]}`); break; }
+        // (a map error object logged without its message: MapLibre's minified AJAXError and the like)
+        if (/^[A-Za-z]{1,3}$/.test(text.trim())) { warnings.push(`map error: ${text}`); break; }
+        // (a terrain tile the leveller could not download: the network again)
+        if (/^TypeError: Failed to fetch\s+at protocol \(\S*flatground\.js/.test(text)) { warnings.push('terrain tile did not download'); break; }
         errors.push(`console.${p.type}: ${text}${where(p.stackTrace)}`);
       }
       break;
@@ -175,7 +183,54 @@ try {
   await waitFor(() => !!document.getElementById('pilot-start'), 20000, 'the start screen');
   step('the start screen opened by itself; the game\'s save is never written (src/guard.js)');
   if (await evaluate(() => FG.game.save() !== false)) errors.push('FG.game.save wrote the save (src/guard.js)');
-  await evaluate(() => { const el = document.getElementById('pilot-start'); if (el) el.remove(); });
+
+  step('start screen: a gallery of every type, airport search, runways at ZRH, start modes, livery, time and wind');
+  const ss = await evaluate(() => {
+    const el = document.getElementById('pilot-start');
+    const q = (s) => el.querySelector(s);
+    const out = { cards: el.querySelectorAll('.fs-plane').length, types: Object.keys(FG.pilot.types).length, rw: el.querySelectorAll('[data-rw]').length,
+      map: !!q('.fs-map .leaflet-pane'), livs: q('#fs-livery').options.length, go: !!q('[data-ps=go]') };
+    q('[data-fs-group=props]').click();
+    out.props = el.querySelectorAll('.fs-plane').length;
+    q('[data-fs-group=all]').click();
+    const ap = q('#ps-ap'); ap.value = 'genev'; ap.dispatchEvent(new Event('input', { bubbles: true }));
+    out.suggest = [...el.querySelectorAll('#fs-suggest [data-ap]')].map((b) => b.dataset.ap);
+    const gva = q('#fs-suggest [data-ap=GVA]'); if (gva) gva.click();
+    out.gvaRw = el.querySelectorAll('[data-rw]').length;
+    q('[data-type="A350-900"]').click();
+    q('[data-wind=set]').click();
+    const f = q('#fs-wfrom'), k = q('#fs-wkt'); f.value = '270'; k.value = '20'; k.dispatchEvent(new Event('input', { bubbles: true }));
+    q('[data-time=day]').click();
+    out.clock = q('#fs-clock').textContent;
+    out.xwind = q('#fs-xwind').textContent;
+    return out;
+  });
+  if (ss.cards !== ss.types || ss.cards < 16 || !ss.rw || !ss.map || ss.livs < 2 || !ss.go) errors.push(`start screen: ${JSON.stringify(ss)}`);
+  if (!(ss.props > 0 && ss.props < ss.cards)) errors.push(`start screen: the Propellers filter shows ${ss.props} of ${ss.cards}`);
+  if (!ss.suggest.includes('GVA') || !ss.gvaRw) errors.push(`start screen: searching "genev" did not find Geneva and its runways: ${JSON.stringify(ss)}`);
+  if (!/^12:00 local at GVA/.test(ss.clock) || !/crosswind/.test(ss.xwind)) errors.push(`start screen: time or wind not shown: ${JSON.stringify(ss)}`);
+  await evaluate(() => document.querySelector('#pilot-start [data-ps=go]').click());
+  await waitFor(() => FG.pilot.active && !FG.pilot.state.loading, 20000, 'the A350 from the start screen');
+  await sleep(1500);
+  const started = await evaluate(() => {
+    const s = FG.pilot.state, a = G.airportByCode.GVA;
+    const lt = ((Math.floor(G.localTime('GVA', FG.ui.time)) % 1440) + 1440) % 1440;
+    return { type: FG.pilot.type, near: G.distanceKm(s, a) < 5, wind: s.wind && Math.round(s.wind.kt), from: s.wind && s.wind.from, lt, gone: !document.getElementById('pilot-start') };
+  });
+  if (started.type !== 'A350-900' || !started.near || started.wind !== 20 || started.from !== 270 || Math.abs(started.lt - 720) > 10 || !started.gone) errors.push(`start screen: the flight did not start as picked: ${JSON.stringify(started)}`);
+  // in the air the wind moves the plane: 900 m up, nose north at 130 m/s, a 20 kt west wind makes the track ~4.5° (headless
+  // frames are slow, so the track, not the distance, is what to check)
+  const drift = await evaluate(async () => {
+    const s = FG.pilot.state;
+    Object.assign(s, { onGround: false, h: s.groundH + 900, V: 130, gamma: 0, psi: 0, theta: 3, alpha: 3, lever: 0.86, gearDown: false, gear: 0 });
+    const lon0 = s.lon;
+    await new Promise((r) => setTimeout(r, 2500));
+    return { east: (s.lon - lon0) * 111320 * Math.cos(s.lat * Math.PI / 180), track: s.track };
+  });
+  if (!(drift.east > 0.5) || !(drift.track > 3 && drift.track < 7)) errors.push(`wind: a 270° wind did not drift the plane east: ${JSON.stringify(drift)}`);
+  await evaluate(() => FG.pilot.stop());
+  await waitFor(() => !!document.getElementById('pilot-start'), 5000, 'the start screen again after leaving');
+  await evaluate(() => { const el = document.getElementById('pilot-start'); el.querySelector('[data-wind=game]').click(); el.querySelector('[data-ps=no]').click(); });
 
     step('fly it yourself (P): an A350 lined up at Zurich, TOGA spools the engines, the keys are the plane\'s, its 3D cockpit, a checkpoint goes back, Esc opens its menu, Q leaves');
     await evaluate(() => {
@@ -234,7 +289,7 @@ try {
         }, type);
         await waitFor(() => FG.pilot.active && !FG.pilot.state.loading, 20000, `the hand-flown ${type} to be ready`);
         await evaluate(() => { FG.pilot.state.lever = 1; });
-        if (!await waitFor(() => FG.pilot.state.n1.every((n) => n > FG.pilot.state.spec.idle + 10) || FG.pilot.state.crashed, 30000)) {
+        if (!await waitFor(() => FG.pilot.state.n1.every((n) => n > FG.pilot.state.spec.idle + 10) || FG.pilot.state.crashed, 75000)) { // (software 3D: few frames)
           const d = await evaluate(() => { const s = FG.pilot.state; return { n1: s.n1, lever: s.lever, idle: s.spec.idle, loading: s.loading, paused: s.paused, menu: s.menu, athr: s.athr, athrMode: s.athrMode, fm: !!(FG.fmgc && FG.fmgc.on), active: FG.pilot.active }; });
           throw new Error(`the ${type}'s engines did not spool up: ${JSON.stringify(d)}`);
         }
