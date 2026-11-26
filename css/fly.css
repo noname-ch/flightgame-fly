@@ -210,3 +210,4 @@ body.piloting .view3d-controls { display: none; }
 .fs-foot .row { display: flex; gap: 8px; margin: 0 0 0 auto; }
 @media (max-width: 1000px) { .fs-body { grid-template-columns: 1fr 1fr; } .fs-planes { grid-column: 1 / -1; } }
 @media (max-width: 640px) { .fs-body { grid-template-columns: 1fr; } .fs-gallery { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); } }
+

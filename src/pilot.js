@@ -425,6 +425,9 @@
         gearDown: fixed, gear: fixed ? 1 : 0, lever: 0.86, gamma: -3 * DEG, mass: s.spec.landMass });
       s.n1 = n1At(sp.engine === 'jet' || sp.engine === 'sst' ? 60 : 45);
       pts = [[e.lat, e.lon], [lat, lon]];
+      // (the ground along the approach, every quarter of a mile: approachStart)
+      s.apDist = [];
+      for (let d = 0.25 * 1852; d <= s.finalNm * 1852 + 1; d += 0.25 * 1852) { s.apDist.push(d); pts.push(offset(e.lat, e.lon, e.course + 180, d)); }
     } else {
       s.mode = 'runway';
       const [lat, lon] = offset(e.lat, e.lon, e.course, 60);
@@ -443,6 +446,7 @@
         e.h = thr;
         s.h = thr + 15 + Math.tan(3 * DEG) * s.finalNm * 1852;
         s.groundH = h[1] ?? thr;
+        approachStart(e, thr, h.slice(2));
       } else if (s.mode === 'runway') {
         s.h = s.groundH = h[0] ?? 0;
       } else if (h[0] != null) s.groundH = h[0];
@@ -460,6 +464,34 @@
       : s.mode === 'final' ? `${s.finalNm} NM final for runway ${e.code} ${e.name}, ${sp.name}. ${sp.gear === 'fixed' ? '' : 'Gear (G), '}${CONF.length > 1 ? 'flaps (F), ' : ''}about ${sp.finalKt} kt, follow the ILS.` : 'You have control.', 'info', 7000);
     if (s.mode === 'air') speak('You have control');
     if (FG.fmgc) FG.fmgc.begin(opts);
+  }
+  // Mountains on the approach (Innsbruck's runway 08: ten miles out on its centre line the ground is 2,000 m up):
+  // the start used to be inside them. The 3° path must clear the ground by 150 m all the way in: else the final starts
+  // in front of the first high ground, if that leaves 3 miles or more; else above all of it (a steep descent, or a
+  // circle to lose height). `ground`: the heights at s.apDist.
+  function approachStart(e, thr, ground) {
+    const glide = (d) => thr + 15 + Math.tan(3 * DEG) * d;
+    const full = (s.finalNm || s.spec.finalNm) * 1852;
+    // (the clearance grows from the threshold out, 3.5 m in 100, to 150 m: flat ground always clears the 3° path)
+    const clear = (d) => Math.min(150, 0.035 * d);
+    const blocked = s.apDist.findIndex((d, i) => ground[i] != null && ground[i] + clear(d) > glide(d));
+    if (blocked < 0) return;
+    const dB = s.apDist[blocked];
+    let d = full, h = glide(full);
+    if (dB - 926 >= 3 * 1852) {
+      d = dB - 926;
+      h = glide(d);
+      say(`High ground ${(dB / 1852).toFixed(1)} NM out on this approach: you start on a ${(d / 1852).toFixed(1)} NM final`, 'amber', 7000);
+    } else {
+      const top = Math.max(...ground.filter((g) => g != null));
+      h = Math.max(glide(full), top + 300);
+      say(`High ground right on this approach: you start above it at ${Math.round(h / FT / 100) * 100} ft. A steep descent (speed brakes, gear) or a circle to lose height, or pick another runway`, 'amber', 9000);
+    }
+    [s.lat, s.lon] = offset(e.lat, e.lon, e.course + 180, d);
+    s.h = h;
+    const k = Math.min(ground.length - 1, Math.max(0, Math.round(d / (0.25 * 1852)) - 1));
+    s.groundH = ground[k] ?? s.groundH;
+    s.ghReal = null;
   }
   function stop() {
     if (!s.active) return;
@@ -807,6 +839,7 @@
     s.lon += (vE * dt) / (R_E * Math.cos(s.lat * DEG)) / DEG;
     if (!s.onGround && s.h <= s.groundH) touchdown();
     if (s.onGround) s.h = s.groundH;
+    if (!s.crashed) buildings();
   }
 
   // Conventional controls (the Boeings, Concorde, turboprops, the classics, and any fly-by-wire type with the limiter
@@ -975,6 +1008,98 @@
   const ailLeft = (cut) => (cut ? clamp((cut - 0.6) / 0.4, 0, 1) : 1); // (the ailerons: 0.6 half spans out to the tip)
   const sideName = (k) => (k < 0 ? 'left' : 'right');
 
+  // ---------- the airports' buildings are solid ----------
+  // Terminals, piers, halls, hangars, towers, car parks and jet bridges (the game's G.apronOf: outlines with a base and
+  // a top in metres above the ground) within a few kilometres, gathered every two seconds. Each physics step the nose,
+  // the middle, the tail and both wing tips are tested against them: the fuselage into one is a crash (flown into it,
+  // or taxied into it slowly); a wing tip into one breaks the wing there (its tip when slow), and the plane flies or
+  // rolls on without it. Where a wing has broken off, its new end is tested.
+  const BUILDING_NAME = { terminal: 'terminal', hall: 'terminal hall', roof: 'terminal roof', plant: 'roof plant', hangar: 'hangar',
+    tower: 'control tower', carpark: 'car park', bridge: 'jet bridge', other: 'building' };
+  function buildingsNear() {
+    const now = performance.now();
+    if (s.bNear && now - s.bNear.at < 2000 && Math.abs(s.bNear.lat - s.lat) < 0.02 && Math.abs(s.bNear.lon - s.lon) < 0.03) return s.bNear.list;
+    const list = [];
+    if (G.apronOf) {
+      const dLon = 0.07 / Math.max(0.2, Math.cos(s.lat * DEG));
+      for (const a of airportList()) {
+        if (Math.abs(a.lat - s.lat) > 0.07 || Math.abs(a.lon - s.lon) > dLon) continue;
+        let ap = null;
+        try { ap = G.apronOf(a.code); } catch (e) { /* no layout yet */ }
+        for (const b of (ap && ap.buildings) || []) {
+          if (!b.ring || b.ring.length < 3 || !(b.h > 1.5)) continue;
+          let s0 = Infinity, n0 = Infinity, s1 = -Infinity, n1 = -Infinity;
+          for (const [la, lo] of b.ring) { s0 = Math.min(s0, la); s1 = Math.max(s1, la); n0 = Math.min(n0, lo); n1 = Math.max(n1, lo); }
+          list.push({ ring: b.ring, base: b.base || 0, h: b.h, kind: b.kind, code: a.code, box: [s0, n0, s1, n1] });
+        }
+      }
+    }
+    s.bNear = { at: now, lat: s.lat, lon: s.lon, list };
+    return list;
+  }
+  function inRing(ring, lat, lon) {
+    let inside = false;
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+      const [ai, oi] = ring[i], [aj, oj] = ring[j];
+      if ((ai > lat) !== (aj > lat) && lon < ((oj - oi) * (lat - ai)) / (aj - ai) + oi) inside = !inside;
+    }
+    return inside;
+  }
+  const halfSpan = () => {
+    const look = FG.data && FG.data.looks && FG.data.looks[s.type];
+    return (look && look.span ? look.span : Math.sqrt(s.spec.S * 9)) / 2;
+  };
+  const lengthOf = () => {
+    const look = FG.data && FG.data.looks && FG.data.looks[s.type];
+    return look && look.len ? look.len : Math.sqrt(s.spec.S * 9);
+  };
+  // What of it is in a building: null, or { what: 'body' | 'wing', side, b }. Heights: the wheels at agl, the fuselage's
+  // middle a tenth of its length above them, the wing tips up or down with the bank.
+  function hitBuilding() {
+    const agl = s.h - s.groundH;
+    if (agl > 400) return null;
+    const list = buildingsNear();
+    if (!list.length) return null;
+    const hdg = (s.tumble ? s.tumble.hdg : s.psi) * DEG, pitch = (s.tumble ? s.tumble.pitch : s.theta) * DEG, bank = (s.tumble ? s.tumble.bank : s.phi) * DEG;
+    const len = lengthOf(), half = halfSpan();
+    const mid = agl + 0.1 * len;
+    const mLat = 1 / 111320, mLon = 1 / (111320 * Math.cos(s.lat * DEG));
+    const pt = (fwd, right, up) => [s.lat + (fwd * Math.cos(hdg) - right * Math.sin(hdg)) * mLat, s.lon + (fwd * Math.sin(hdg) + right * Math.cos(hdg)) * mLon, up];
+    const pts = [
+      ['body', 0, pt(0.45 * len * Math.cos(pitch), 0, mid + 0.45 * len * Math.sin(pitch))],
+      ['body', 0, pt(0, 0, mid)],
+      ['body', 0, pt(-0.45 * len * Math.cos(pitch), 0, mid - 0.45 * len * Math.sin(pitch))],
+    ];
+    for (const side of [-1, 1]) {
+      const reach = half * (s.dmg.cut[side < 0 ? 0 : 1] || 1);
+      pts.push(['wing', side, pt(-0.05 * len, side * reach * Math.cos(bank), mid - side * reach * Math.sin(bank))]);
+    }
+    for (const b of list) {
+      for (const [what, side, [la, lo, up]] of pts) {
+        if (la < b.box[0] || la > b.box[2] || lo < b.box[1] || lo > b.box[3]) continue;
+        if (up < b.base - 0.5 || up > b.h) continue;
+        if (inRing(b.ring, la, lo)) return { what, side, b };
+      }
+    }
+    return null;
+  }
+  function buildings() {
+    const hit = hitBuilding();
+    if (!hit) return false;
+    const name = `${BUILDING_NAME[hit.b.kind] || 'building'} at ${hit.b.code}`;
+    const kt = Math.round(ias());
+    if (hit.what === 'wing') {
+      const slow = s.V < 15;
+      const done = breakOff(slow ? 'tip' : 'wing', hit.side, `The ${sideName(hit.side)} wing hit the ${name} and broke off`, s.onGround);
+      if (done) return false;
+      if (!slow) { crash(`The ${sideName(hit.side)} wing hit the ${name} at ${kt} kt`, { slide: s.onGround, spin: hit.side * 60 }); return true; }
+      s.V = 0; // (its stub against the wall: it stops there)
+      return false;
+    }
+    crash(s.V < 8 ? `Taxied into the ${name}` : `Flew into the ${name} at ${kt} kt`, { slide: false });
+    return true;
+  }
+
   // the airframe's limits: past 1.3 × its limit load a wing tip tears off, past 1.5 × (its ultimate load) a wing
   // breaks, past 1.9 × both; past its dive speed (VD, about VMO + 50 kt / MMO + 0.07) it shakes, then flutter takes
   // the elevators, then the ailerons and a wing tip, and far past it the wing. True when it can't fly on.
@@ -1139,7 +1264,7 @@
     if (s.h <= s.groundH) {
       s.h = s.groundH;
       crash(`${t.why}: it hit the ground at ${Math.round(V / KT)} kt`, { slide: false });
-    }
+    } else buildings();
   }
 
   // The end: a fireball where it hits (the game's crash blasts, in real time: js/view3d.js updateBlasts); flown into
@@ -1201,8 +1326,12 @@
     if (d.elev === 2) s.aTrim += (Math.random() - 0.5) * 1.2 * dt;
   }
   function touchdown() {
-    const vs = s.V * Math.sin(s.gamma);
+    // the sink rate against the ground: rising ground under a plane flying on (a hillside) comes up at it
+    const rise = Math.max(0, (s.gSlope || 0) * s.V * Math.cos(s.gamma));
+    const deep = s.groundH - s.h; // (how far into it the ground came between two of its answers)
+    const vs = s.V * Math.sin(s.gamma) - rise;
     const fpm = vs / FT * 60;
+    const slope = Math.abs(s.gSlope || 0);
     s.h = s.groundH;
     s.onGround = true;
     s.gamma = 0;
@@ -1210,7 +1339,9 @@
     const sp = s.spec;
     const side = s.phi > 0 ? 1 : -1, sideName = side > 0 ? 'right' : 'left';
     let dig = false; // (a wing dug in: it breaks off and the wreck slews round towards it)
-    if (fpm < -sp.crashFpm * 2.5) why = `Hit the ground at ${Math.round(-fpm)} ft/min`;
+    const hill = !onRunway() && (slope > 0.06 || rise > 4 || deep > 15);
+    if (hill) why = `Flew into the ${slope > 0.25 ? 'mountainside' : 'hillside'} at ${Math.round(ias())} kt`;
+    else if (fpm < -sp.crashFpm * 2.5) why = `Hit the ground at ${Math.round(-fpm)} ft/min`;
     else if (Math.abs(s.phi) > sp.tipBank + 5) { why = `The ${sideName} wing dug in at ${Math.round(Math.abs(s.phi))}° of bank and broke off: it cartwheeled`; dig = true; }
     else if (s.gear < 0.99) why = s.gear < 0.1 ? 'Gear-up landing' : 'The gear was not down and locked';
     else if (fpm < -sp.crashFpm) why = `Hit the ground at ${Math.round(-fpm)} ft/min`;
@@ -1219,7 +1350,7 @@
     else if (s.V > sp.tyreKt * KT) why = 'Far too fast for the tyres';
     if (why) {
       if (dig) breakOff('wing', side, null, true);
-      crash(why, { slide: true, spin: dig ? side * (90 + 60 * Math.random()) : (Math.random() - 0.5) * 30, hard: -fpm });
+      crash(why, { slide: !hill, spin: dig ? side * (90 + 60 * Math.random()) : (Math.random() - 0.5) * 30, hard: -fpm });
       return;
     }
     // a wing tip that touches the runway (a little past the bank it clears) is torn off; the rest of it lands
@@ -1298,17 +1429,39 @@
       draw([]);
       return;
     }
-    // the ground under the plane, as the 3D map draws it (FG.flat.heightsAt, asked a few times a second: the map's
-    // own terrain reads 0 m where its tiles haven't come yet), smoothed
-    if (FG.flat && !s.ghBusy && now - (s.ghAt || 0) > 150) {
-      s.ghBusy = true; s.ghAt = now;
-      const at = [s.lat, s.lon];
-      FG.flat.heightsAt([at], 12).then(([h]) => { if (h != null && isFinite(h)) { s.ghReal = h; s.ghReal0 = at; } }, () => {}).finally(() => { s.ghBusy = false; });
+    // The ground under the plane, as the 3D map draws it (FG.flat.heightsAt; the map's own terrain reads 0 m where
+    // its tiles haven't come yet), and its slope along the track: asked every frame (with its tiles in, the answer
+    // is there at once). The tiles 4 and 10 seconds ahead are fetched before it gets there (once a second): the
+    // answer used to wait for a tile still on its way, so in the mountains (Innsbruck) the plane flew on over the
+    // old height and through the slopes, then "landed" on them as the tile came. Until a new answer comes the last
+    // one is carried on along its slope.
+    if (FG.flat) {
+      const trk = s.psi * DEG, run = Math.max(0, s.V * Math.cos(s.gamma));
+      const ahead = (m) => [s.lat + (m * Math.cos(trk)) / 111320, s.lon + (m * Math.sin(trk)) / (111320 * Math.cos(s.lat * DEG))];
+      if (!s.ghBusy) {
+        s.ghBusy = true;
+        const at = [s.lat, s.lon], fwd = ahead(30);
+        FG.flat.heightsAt([at, fwd], 12).then(([h, h1]) => {
+          if (h == null || !isFinite(h)) return;
+          s.ghReal = h; s.ghReal0 = at; s.ghTrk = trk;
+          s.gSlope = h1 != null && isFinite(h1) ? clamp((h1 - h) / 30, -2, 2) : 0;
+        }, () => {}).finally(() => { s.ghBusy = false; });
+      }
+      if (now - (s.ghPre || 0) > 1000) {
+        s.ghPre = now;
+        FG.flat.heightsAt([ahead(run * 4 + 150), ahead(run * 10 + 500), ahead(run * 20 + 1000)], 12).catch(() => {});
+      }
     }
-    const gh = s.ghReal != null ? s.ghReal : groundAt(s.lat, s.lon);
+    let gh = s.ghReal != null ? s.ghReal : groundAt(s.lat, s.lon);
+    if (s.ghReal != null && s.ghReal0) {
+      // (carried on from where it was asked: along the track, up or down its slope)
+      const dN = (s.lat - s.ghReal0[0]) * 111320, dE = (s.lon - s.ghReal0[1]) * 111320 * Math.cos(s.lat * DEG);
+      const along = dN * Math.cos(s.ghTrk || 0) + dE * Math.sin(s.ghTrk || 0);
+      if (Math.abs(along) > 2 && Math.hypot(dN, dE) < 3000) gh += (s.gSlope || 0) * along;
+    }
     if (gh != null) {
       if (Math.abs(gh - s.groundH) > 60 && !s.onGround) s.groundH = gh;
-      else s.groundH += (gh - s.groundH) * (1 - Math.exp(-dtAll / 0.25));
+      else s.groundH += (gh - s.groundH) * (1 - Math.exp(-dtAll / (s.onGround ? 0.25 : 0.08)));
     }
     if (!s.paused && !s.menu) piecesStep(Math.min(dtAll, 0.1));
     if (!s.paused && !s.menu && s.crashed && s.wreck) wreckStep(Math.min(dtAll, 0.1));

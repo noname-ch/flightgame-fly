@@ -207,6 +207,33 @@ pedestal). Drag to look round; look up and to the right for the overhead panel.
 LDG memo under 2000 ft, and the green memos. The SD shows the ENG page when an engine is out or starting, the APU
 page while the APU runs, and the WHEEL page otherwise.
 
+## Damage and crashes
+
+Parts break off the way they do on real aircraft, and the game's 3D view draws the aircraft without them and the
+parts falling away, tumbling and lying where they land (the game's `js/livery.js` PARTS cut each model into wing tips,
+outer wings, elevators and rudder):
+
+- **Overstress:** past 1.3 × the type's limit load (or −1.3 g) a wing tip tears off, past 1.5 × (its ultimate load) a
+  wing breaks, past 1.9 × both. The wing going up in a rolling pull carries more and breaks first.
+- **Overspeed:** past the dive speed (about VMO + 50 kt or MMO + 0.07) the airframe shakes, then flutter takes the
+  elevators, then an aileron and its wing tip, and far past it the wing.
+- **A wing tip lost:** the wing lifts less on that side (its share of an elliptical spread of lift) and the ailerons
+  that went with it don't roll it any more: by hand it rolls towards the broken side and takes the stick held over,
+  more as it slows (the lift moves outboard); fly-by-wire holds it by itself as long as its ailerons can.
+- **A wing lost:** more roll than the ailerons can hold: it rolls over and goes out of control (OUT OF CONTROL), a
+  corkscrewing dive the controls can't stop; a four-engined type loses that wing's outer engine.
+- **Elevator jammed:** the stick does nothing to the pitch; the stabiliser trim (Home / End) still does, slowly, and
+  so does thrust (the engines under the wing push the nose up as they spool up). An Airbus drops to direct law.
+- **Elevators broken off:** no pitch control at all except thrust, and the nose wanders: as the crews of United 232
+  and DHL's A300 over Baghdad flew theirs.
+- **Rudder broken off:** the rudder pedals do nothing in the air.
+- **On the runway:** a wing tip a little past the bank it clears is torn off and the aircraft lands on; more bank and
+  the wing digs in and breaks off: it cartwheels, and the wreck slides on and slews round.
+- **The crash:** a fireball where it hits; flown into the ground fast, nothing is left of it.
+
+To practise, the Esc menu has **Failures**: a wing tip (left or right), the elevator jamming, the elevators or the
+rudder breaking off, the left wing breaking. Checkpoints (Z) keep the damage too.
+
 ## Files
 
 | File | What it is |
