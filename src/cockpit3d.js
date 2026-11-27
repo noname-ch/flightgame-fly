@@ -147,8 +147,11 @@ function quad(tl, tr, bl, br, mat) {
   return new THREE.Mesh(geo, mat);
 }
 
-function build(kind, nEng) {
+function build(kind, nEng, graftOn = false) {
   useDeck(kind);
+  // (with the A320's 3D modules grafted on: its layout without the painted glareshield and keyboards, the glareshield's
+  // face leaning back as theirs do)
+  const lay = graftOn ? `${kind}g` : kind, faceY = graftOn ? [0.03, 0.004] : [0, 0.03];
   const a320 = !!D.six; // (the A320 family's six square screens: the A320, A330, A340)
   // The windows (2D outlines): the windscreen in its plane (u = |x|, v = z), the side windows in the wall's (u = y, v = z).
   const k = D.scr / 1.19;
@@ -232,12 +235,12 @@ function build(kind, nEng) {
   root.add(shapeMesh(topOutline, [], (u, v) => [u, v, GT], M.shield));
   {
     const span = a320 ? 0.86 : 1.05;
-    const gp = surface('glareshield', kind, nEng);
+    const gp = surface('glareshield', lay, nEng);
     const mat = livePanelMat(gp);
     const n = 40, pos = [], uv = [], idx = [];
     for (let i = 0; i <= n; i++) {
       const x = -span + (2 * span * i) / n, y = lipY(x) + 0.004;
-      pos.push(x, y, GT, x, y + 0.03, GT - GF);
+      pos.push(x, y + faceY[0], GT, x, y + faceY[1], GT - GF);
       uv.push(i / n, 1, i / n, 0);
       if (i < n) idx.push(2 * i, 2 * i + 1, 2 * i + 2, 2 * i + 1, 2 * i + 3, 2 * i + 2);
     }
@@ -251,7 +254,7 @@ function build(kind, nEng) {
       const pos2 = [], idx2 = [];
       for (let i = 0; i <= 8; i++) {
         const x = s * (span + ((HALF - span) * i) / 8), y = lipY(x) + 0.004;
-        pos2.push(x, y, GT, x, y + 0.03, GT - GF);
+        pos2.push(x, y + faceY[0], GT, x, y + faceY[1], GT - GF);
         if (i < 8) idx2.push(2 * i, 2 * i + 1, 2 * i + 2, 2 * i + 1, 2 * i + 3, 2 * i + 2);
       }
       const g2 = new THREE.BufferGeometry();
@@ -317,8 +320,9 @@ function build(kind, nEng) {
     g.add(sheen);
     root.add(g);
     screens.push({ kind: kindS, cv, ctx: cv.getContext('2d'), tex, side: u < 0 ? 0 : 1 });
+    if (kindS.startsWith('ois')) { face.userData.panel = oisPanel(u < 0 ? 0 : 1, cv); clickables.push(face); } // (its tabs and the map's settings)
   };
-  const vS = 0.012;
+  const vS = graftOn ? 0.045 : 0.012; // (lower under the grafted modules, which stand out of the glareshield)
   let isisAt, gearAt;
   if (a320) {
     // six square screens: PFD, ND · E/WD over SD · ND, PFD
@@ -388,7 +392,7 @@ function build(kind, nEng) {
   // the pedestal: from under the panel back between the seats
   const ped = a320 ? { w: 0.25, top: -0.72, front: 0.62, slope: 0.30, rear: -0.70 } : { w: 0.27, top: -0.76, front: 0.74, slope: 0.36, rear: -0.70 };
   {
-    const pp = surface('pedestal', kind, nEng);
+    const pp = surface('pedestal', lay, nEng);
     const mat = livePanelMat(pp);
     // its top: the slope then flat (u = x, v = along)
     const prof = [[ped.front, P.bot + 0.02], [ped.slope, ped.top], [ped.rear, ped.top]];
@@ -494,7 +498,8 @@ function build(kind, nEng) {
 
   const scene = new THREE.Scene();
   scene.add(root);
-  return { kind, nEng, eyeX: D.EYE_X, scene, screens, gear, levers, sticks, lit, panels, clickables, wipers, hemi, sun, amb, dome, flood };
+  return { kind, nEng, eyeX: D.EYE_X, scene, root, screens, gear, levers, sticks, lit, panels, clickables, wipers, hemi, sun, amb, dome, flood,
+    at: { lipY, GT, GF, faceY, ped, P } }; // (`at`: where the grafted modules go)
 }
 
 // ---------- the real A320-family flight deck (FlightGear's, src/fgdeck.js) ----------
@@ -505,10 +510,12 @@ function build(kind, nEng) {
 const FG_PACK = new URL('../cockpits/A320-family.fgck', import.meta.url).href;
 const fg = { pack: null, loading: null, failed: false, Deck: null };
 const fgKind = (kind) => ['a320', 'a330', 'a330neo', 'a340', 'a346'].includes(kind) && !fg.failed && !/[?&]built\b/.test(location.search);
+// (the A350s and the A380 keep their own deck, with the A320's 3D modules grafted on: graft below)
+const graftKind = (kind) => kind === 'a350' && !fg.failed && !/[?&]built\b/.test(location.search);
 function fgLoad() {
   if (fg.loading) return;
   fg.loading = import(`./fgdeck.js${V}`).then(async (m) => { fg.Deck = m.Deck; fg.pack = await m.load(FG_PACK); })
-    .then(() => { for (const k of Object.keys(pits)) if (fgKind(pits[k].kind) && !pits[k].fg) delete pits[k]; if (FG.view3d && FG.view3d.map) FG.view3d.map.triggerRepaint(); })
+    .then(() => { for (const k of Object.keys(pits)) if ((fgKind(pits[k].kind) || graftKind(pits[k].kind)) && !pits[k].fg) delete pits[k]; if (FG.view3d && FG.view3d.map) FG.view3d.map.triggerRepaint(); })
     .catch((e) => { fg.failed = true; console.warn('the A320 family\'s flight deck (FlightGear) did not load:', e); });
 }
 // how bright a lamp the model lights (its emission colour × this)
@@ -559,10 +566,12 @@ function buildFg(kind, nEng) {
   // materials: the parts with the same texture and colour share one, a part an animation lights has its own
   const shared = new Map(), mats = [];
   const clickables = [];
+  const mcdus = [];
   for (const b of pack.parts) {
     const lamp = !!(def && def.nodes[b.node] && def.nodes[b.node].lamp), lit = litBy(b.node) ? b.node : 0;
     const key = `${b.tex}|${b.rgb}|${b.emis}|${lamp}`;
-    let m = lit ? null : shared.get(key);
+    // (the MCDUs' screens: the MCDU's pages, src/mcdu.js)
+    let m = isMcduScreen(b) ? mcduScreen(mcdus, b).mat : lit ? null : shared.get(key);
     if (!m) {
       const map = texOf(b.tex);
       m = new THREE.MeshStandardMaterial({ map, emissiveMap: map, emissive: 0x000000, roughness: 0.72, metalness: 0.04, side: THREE.DoubleSide, alphaTest: map && map.userData.png ? 0.5 : 0 });
@@ -600,7 +609,154 @@ function buildFg(kind, nEng) {
   { const s = pack.screens.find((x) => x.screen === 'engines'); let y = 0.7, z = -0.2; if (s) { y = 0; z = 0; for (let i = 0; i < s.pos.length; i += 3) { y += s.pos[i + 1]; z += s.pos[i + 2]; } y /= s.pos.length / 3; z /= s.pos.length / 3; } flood.position.set(0, y - 0.3, z + 0.12); }
   const scene = new THREE.Scene();
   scene.add(root, hemi, sun, sun.target, amb, dome, flood);
-  return { kind, nEng, eyeX: cx, D, scene, screens, lit: [], panels: [], clickables, hemi, sun, amb, dome, flood, fg: { deck, nodes, mats, gen: -1, glow: -1, fcuTxt } };
+  return { kind, nEng, eyeX: cx, D, scene, screens, lit: [], panels: [], clickables, hemi, sun, amb, dome, flood, mcdus, fg: { deck, nodes, poses: [...nodes], mats, gen: -1, glow: -1, fcuTxt } };
+}
+// ---------- the MCDUs of FlightGear's deck: their screens and keys ----------
+// Their screens show the MCDU's pages (src/mcdu.js FG.mcdu.draw) and their keys press its keys (the pack's keys do
+// nothing: FlightGear's MCDU is Nasal). The keys by the pack's node: line select keys, the page keys, the slew keys,
+// the number pad and the letters, the captain's MCDU then the first officer's.
+const isMcduScreen = (b) => !!b.tex && b.tex.includes('MCDU_screen');
+function mcduScreen(list, b) {
+  let x = 0;
+  for (let i = 0; i < b.pos.length; i += 3) x += b.pos[i];
+  const side = x / (b.pos.length / 3) > 0.45 ? 1 : 0; // (pack space: the deck's middle at 0.45 m right of the captain)
+  const had = list.find((m) => m.side === side);
+  if (had) return had;
+  const cv = canvas(480, 448), tex = texture(cv);
+  tex.flipY = false; // (the pack's texture places count from the top)
+  const mat = new THREE.MeshBasicMaterial({ map: tex, toneMapped: false, side: THREE.DoubleSide });
+  const m = { side, cv, ctx: cv.getContext('2d'), tex, mat };
+  list.push(m);
+  return m;
+}
+const MCDU_KEYS = new Map();
+{
+  const rows = [
+    ['lsk', ['L1', 'L2', 'L3', 'L4', 'L5', 'L6'], [600, 602, 604, 606, 608, 610], [601, 603, 605, 607, 609, 611]],
+    ['lsk', ['R1', 'R2', 'R3', 'R4', 'R5', 'R6'], [788, 790, 792, 794, 796, 798], [789, 791, 793, 795, 797, 799]],
+    ['f', ['DIR', 'PROG', 'PERF', 'INIT', 'DATA'], [330, 776, 756, 581, 313], [331, 777, 757, 582, 314]],
+    ['f', ['F-PLN', 'RAD NAV', 'FUEL PRED', 'ATC COMM', 'MCDU MENU'], [441, 864, 522, 86, 647], [442, 865, 523, 87, 648]],
+    ['f', ['AIRPORT', '←', '↑', '→', '↓'], [55, 617, 945, 887, 334], [56, 618, 946, 888, 335]],
+    ['k', ['1', '2', '3', '4', '5', '6', '7', '8', '9', '.', '0', '+/-'], [9, 11, 13, 15, 17, 19, 21, 23, 25, 3, 7, 1], [10, 12, 14, 16, 18, 20, 22, 24, 26, 4, 8, 2]],
+    ['k', 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('').concat(['/', 'SP', 'OVFY', 'CLR']),
+      [27, 254, 280, 311, 337, 443, 536, 564, 571, 592, 594, 598, 636, 667, 682, 747, 781, 786, 896, 920, 943, 947, 961, 973, 977, 985, 5, 909, 686, 300],
+      [28, 255, 281, 312, 338, 444, 537, 565, 572, 593, 595, 599, 637, 668, 683, 748, 782, 787, 897, 921, 944, 948, 962, 974, 978, 986, 6, 910, 687, 301]],
+  ];
+  for (const [kind, keys, capt, fo] of rows) keys.forEach((k, i) => { MCDU_KEYS.set(capt[i], [kind, k]); MCDU_KEYS.set(fo[i], [kind, k]); });
+  for (const n of [649, 650]) MCDU_KEYS.set(n, ['screen', '']);
+}
+const MCDU_TIPS = { lsk: (k) => `MCDU line select key ${k}`, f: (k) => `MCDU ${k}`, k: (k) => `MCDU ${k}`, screen: () => 'MCDU: the big MCDU, to type on the keyboard (Y)' };
+function mcduKey(node) {
+  const k = MCDU_KEYS.get(node);
+  if (!k) return null;
+  return { tip: MCDU_TIPS[k[0]](k[1]), click: () => { if (!FG.mcdu) return; if (k[0] === 'screen') FG.mcdu.toggle(); else FG.mcdu.press(k[0], k[1]); mcduAt = 0; } };
+}
+let mcduAt = 0;
+function paintMcdus(now) {
+  if (!pit.mcdus || !pit.mcdus.length || now - mcduAt < 200 || !FG.mcdu || !FG.mcdu.draw) return;
+  mcduAt = now;
+  for (const m of pit.mcdus) { FG.mcdu.draw(m.ctx, m.cv.width, m.cv.height); m.tex.needsUpdate = true; }
+}
+
+// ---------- the A320's modules in the A350 ----------
+// The A350 deck built above, with FlightGear's A320 modules (its real 3D FCU, the two EFIS control panels, the
+// two MCDUs) cut out of the pack and put where the A350 has them: the FCU in the middle of the glareshield, each EFIS
+// panel before its pilot (MASTER WARN / CAUT stay the A350's own, outboard of them), the MCDUs on the front of the pedestal where its keyboards (KCCU) are. They work as in the A320s (fgSync: the FCU's
+// knobs and windows, the EFIS's ND mode, range, options, LS, FD, needles; the MCDUs' pages and keys).
+// Each module: its box in pack space (a triangle is taken when all its corners are in it), where its middle goes in
+// the A350 (x across; on the glareshield's curve or the pedestal's slope) and the module's own tilt.
+const GRAFT = [
+  { name: 'fcu', box: [0.322, 0.578], at: 0 },
+  { name: 'efis', box: [0.17, 0.322], at: -0.44 },
+  { name: 'efis', box: [0.578, 0.73], at: 0.44 },
+  { name: 'mcdu', box: [0.193, 0.338], at: -0.17, ped: true },
+  { name: 'mcdu', box: [0.562, 0.707], at: 0.17, ped: true },
+];
+const GLARE_BOX = [0.595, 0.68, -0.275, -0.18], MCDU_BOX = [0.52, 0.758, -0.86, -0.70];
+// (the A320's: the face of its glareshield panels, the middle of its MCDUs, the lean of the MCDU's face)
+const A320_FACE = { y: 0.648, z: -0.2275 }, A320_MCDU = { y: 0.64, z: -0.77, tilt: 0.165 };
+function graft(p) {
+  const pack = fg.pack, deck = pack.deck ? new fg.Deck(pack) : null, def = deck && deck.def;
+  if (!def) return p;
+  const texs = new Map();
+  const texOf = (key) => {
+    if (!key || !pack.textures.has(key)) return null;
+    if (texs.has(key)) return texs.get(key);
+    const img = new Image(), t = new THREE.Texture(img);
+    t.colorSpace = THREE.SRGBColorSpace; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 4; t.flipY = false;
+    img.onload = () => { t.needsUpdate = true; if (FG.view3d && FG.view3d.map) FG.view3d.map.triggerRepaint(); };
+    img.src = URL.createObjectURL(pack.textures.get(key));
+    t.userData.png = pack.textures.get(key).type === 'image/png';
+    texs.set(key, t);
+    return t;
+  };
+  const litBy = (n) => !!(def.nodes[n] && def.nodes[n].anims.some((a) => def.anims[a].Emit));
+  const shared = new Map(), litMats = new Map(), mats = [], poses = [], mcdus = [];
+  const matOf = (b) => {
+    const lamp = !!(def.nodes[b.node] && def.nodes[b.node].lamp), lit = litBy(b.node) ? b.node : 0;
+    const key = `${b.tex}|${b.rgb}|${b.emis}|${lamp}|${lit}`;
+    const cache = lit ? litMats : shared;
+    if (cache.has(key)) return cache.get(key);
+    const map = texOf(b.tex);
+    const m = new THREE.MeshStandardMaterial({ map, emissiveMap: map, emissive: 0x000000, roughness: 0.72, metalness: 0.04, side: THREE.DoubleSide, alphaTest: map && map.userData.png ? 0.5 : 0 });
+    m.color.setRGB(b.rgb[0], b.rgb[1], b.rgb[2], THREE.SRGBColorSpace);
+    const lin = b.rgb.map((c) => Math.pow(c, 2.2));
+    const own = b.emis > 0 ? lin.map((c) => c * b.emis * LAMP) : lamp ? lin.map((c) => c * LAMP * 0.6) : [0, 0, 0];
+    mats.push({ m, own, node: lit, last: '' });
+    cache.set(key, m);
+    return m;
+  };
+  const A = p.at;
+  let fcuTxt = null;
+  for (const mod of GRAFT) {
+    const [x0, x1] = mod.box, [y0, y1, z0, z1] = mod.ped ? MCDU_BOX : GLARE_BOX, e = 0.004;
+    const inBox = (x, y, z) => x >= x0 - e && x <= x1 + e && y >= y0 - e && y <= y1 + e && z >= z0 - e && z <= z1 + e;
+    // the module: pack space about its own middle, turned and put in place
+    const g = new THREE.Group();
+    const mid = new THREE.Vector3((x0 + x1) / 2, mod.ped ? A320_MCDU.y : A320_FACE.y, mod.ped ? A320_MCDU.z : A320_FACE.z);
+    const inner = new THREE.Group(); inner.position.copy(mid).negate(); g.add(inner);
+    if (mod.ped) {
+      // on the pedestal's slope (from under the main panel up towards the seats), turned from the A320's lean to it
+      const pd = A.ped, bot = A.P.bot + 0.02, slope = Math.atan2(pd.top - bot, pd.front - pd.slope);
+      const y = pd.slope + (pd.front - pd.slope) * 0.45, z = pd.top - (pd.top - bot) * 0.45;
+      g.position.set(mod.at, y, z + 0.009); // (its keys sit a centimetre under its face: the face just over the pedestal's)
+      g.rotation.x = -(slope + A320_MCDU.tilt);
+    } else {
+      // on the glareshield's face, along its curve
+      const y = A.lipY(mod.at), dy = (A.lipY(mod.at + 0.01) - A.lipY(mod.at - 0.01)) / 0.02;
+      g.position.set(mod.at, y + (A.faceY[0] + A.faceY[1]) / 2 - 0.004, A.GT - A.GF / 2);
+      g.rotation.z = Math.atan(dy);
+    }
+    p.root.add(g);
+    const nodeGroups = new Map();
+    const parentOf = (n) => {
+      if (!n || !def.nodes[n]) return inner;
+      if (!nodeGroups.has(n)) { const ng = new THREE.Group(); ng.matrixAutoUpdate = false; inner.add(ng); nodeGroups.set(n, ng); poses.push([n, ng]); }
+      return nodeGroups.get(n);
+    };
+    for (const b of pack.parts) {
+      const keep = [];
+      for (let i = 0; i < b.idx.length; i += 3) {
+        let all = true;
+        for (let k = 0; k < 3 && all; k++) { const v = b.idx[i + k] * 3; all = inBox(b.pos[v], b.pos[v + 1], b.pos[v + 2]); }
+        if (all) keep.push(b.idx[i], b.idx[i + 1], b.idx[i + 2]);
+      }
+      if (!keep.length) continue;
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.BufferAttribute(b.pos, 3));
+      geo.setAttribute('normal', new THREE.BufferAttribute(b.nor, 3));
+      geo.setAttribute('uv', new THREE.BufferAttribute(b.uv, 2));
+      geo.setIndex(keep);
+      geo.computeBoundingSphere();
+      const mesh = new THREE.Mesh(geo, isMcduScreen(b) ? mcduScreen(mcdus, b).mat : matOf(b));
+      parentOf(b.node).add(mesh);
+      if (b.node && def.nodes[b.node] && def.nodes[b.node].picks.length) { mesh.userData.fgNode = b.node; p.clickables.push(mesh); }
+    }
+    if (mod.name === 'fcu') fcuTxt = fcuDigits(inner);
+  }
+  p.mcdus = mcdus;
+  p.fg = { deck, nodes: new Map(), poses, mats, gen: -1, glow: -1, fcuTxt };
+  return p;
 }
 // The FCU's number windows (SPD/MACH, HDG/TRK, ALT, V/S/FPA). FlightGear draws them as text in a seven-segment font
 // (a320.flightdeck.xml: spd-text, hdg-text, alt-text, vs-text, vs-text-last-2-digits, fpa-text), and the pack has no
@@ -1008,7 +1164,7 @@ function fgSync(dt) {
   // every node posed (only when a pose changed)
   if (d.gen !== f.gen) {
     f.gen = d.gen;
-    for (const [n, g] of f.nodes) {
+    for (const [n, g] of f.poses) {
       const p = d.poses[n];
       if (!p) continue;
       g.visible = p.vis;
@@ -1303,30 +1459,95 @@ function oansScreen(c, W, H, P, side) {
   c.restore();
 }
 
-// The information system: a page of the flight's papers (departure, runway, weights, the checklist).
+// The information systems (OIS) beside each pilot, the A350's outer screens: a row of tabs at the bottom (a click
+// picks one; the top of these screens is under the glareshield's lip from the seats) and
+//   - MAP: the A320's navigation map (src/fmgc.js drawNd, the airport map under 10 NM: src/oans.js) with its own
+//     settings beside it, apart from the pilot's ND: RANGE − / +, ARC · ROSE · PLAN, the airport map (AIRPORT), one
+//     of CSTR WPT VOR.D NDB ARPT, TERR (the terrain; not on the north-up PLAN), and = ND (the pilot's ND as this);
+//   - T.O PERF, LDG PERF: the flight's papers; CHECKLIST: the checklists.
+const OIS_TABS = ['MAP', 'T.O PERF', 'LDG PERF', 'CHECKLIST'];
+const OIS_RANGES = [0.2, 0.5, 1, 2, 5, 10, 20, 40, 80, 160, 320];
+const OIS_TOP = 0.21; // (the part of the screen kept clear at its top)
+const oisSt = [0, 1].map(() => ({ tab: 'MAP', terr: false, nd: { mode: 'PLAN', range: 10, zoom: 1, arpt: true, opt: 'ARPT', needle: ['OFF', 'OFF'] } }));
+function oisRange(o, d) {
+  const k = OIS_RANGES.findIndex((r) => r >= o.nd.range - 1e-6);
+  const to = OIS_RANGES[Math.max(0, Math.min(OIS_RANGES.length - 1, (k < 0 ? 7 : k) + d))];
+  o.nd.range = to;
+  if (to < 10) o.nd.zoom = to;
+}
+// the buttons of one OIS (canvas pixels): its tabs, and on MAP the settings
+function oisButtons(W, H, side) {
+  const o = oisSt[side], nd = o.nd, b = [];
+  const th = H * 0.1, tw = W / OIS_TABS.length, top = H * OIS_TOP;
+  OIS_TABS.forEach((t, i) => b.push({ x: i * tw + 4, y: H - th + 4, w: tw - 8, h: th - 8, label: t, on: o.tab === t, tab: true,
+    click: () => { o.tab = t; }, tip: t === 'MAP' ? 'OIS: the map, with its own settings' : `OIS: ${t}` }));
+  if (o.tab !== 'MAP') return b;
+  const x0 = W * 0.715, cw = W - x0 - 8, rh = (H - th - top - 4) / 7, y = (r) => top + r * rh;
+  const add = (r, x, w, label, on, click, tip) => b.push({ x, y: y(r) + 3, w, h: rh - 6, label, on, click, tip });
+  const third = (cw - 8) / 3;
+  add(0, x0, third, '−', false, () => oisRange(o, -1), 'Map range: closer (under 10 NM: the airport map)');
+  b.push({ x: x0 + third + 4, y: y(0) + 3, w: third, h: rh - 6, label: nd.range < 10 ? `${nd.range}` : `${nd.range}`, on: false, readout: true });
+  add(0, x0 + 2 * (third + 4), third, '+', false, () => oisRange(o, 1), 'Map range: further');
+  ['ARC', 'ROSE', 'PLAN'].forEach((m, i) => add(1, x0 + i * (third + 4), third, m, nd.mode === m, () => { nd.mode = m; }, `Map: ${m === 'PLAN' ? 'north up round the aircraft' : m === 'ARC' ? 'heading up, ahead' : 'heading up, all round'}`));
+  add(2, x0, cw, 'AIRPORT', nd.range < 10, () => { if (nd.range < 10) nd.range = 10; else nd.range = nd.zoom || 1; }, 'The airport map (OANS): aprons, taxiways, stands; again: back to the map');
+  ['CSTR', 'WPT', 'VOR.D', 'NDB', 'ARPT'].forEach((k, i) => add(3 + Math.floor(i / 2), x0 + (i % 2) * (cw / 2 + 2), cw / 2 - 2, k, nd.opt === k,
+    () => { nd.opt = nd.opt === k ? null : k; nd.arpt = nd.opt === 'ARPT'; }, { CSTR: 'The flight plan\'s altitude constraints', WPT: 'Waypoints round about', 'VOR.D': 'VORs and DMEs', NDB: 'NDBs', ARPT: 'Airports' }[k]));
+  add(5, x0 + cw / 2 + 2, cw / 2 - 2, 'TERR', o.terr, () => { o.terr = !o.terr; }, 'The terrain on the map (in ARC and ROSE)');
+  add(6, x0, cw, '= ND', false, () => { const M = FM(), src = M && M.F.nds && M.F.nds[side]; if (src) { Object.assign(nd, JSON.parse(JSON.stringify(src))); const y2 = SYS(); o.terr = !!(y2 && y2.S.misc && y2.S.misc.terrNd[side]); } }, 'Take the settings of this pilot\'s ND');
+  return b;
+}
 function ois(c, W, H, st, side) {
+  const o = oisSt[side];
   c.fillStyle = '#0b1016'; c.fillRect(0, 0, W, H);
-  c.fillStyle = '#16202b'; c.fillRect(0, 0, W, H * 0.11);
-  c.fillStyle = '#9fc3e6'; c.font = `600 ${Math.round(H * 0.06)}px system-ui, sans-serif`; c.textAlign = 'left'; c.textBaseline = 'middle';
-  c.fillText(side ? 'OIS · FLT OPS' : 'OIS · AVNCS', W * 0.04, H * 0.055);
-  const tabs = ['T.O PERF', 'LDG PERF', 'W&B', 'CHARTS', 'CHECKLIST'];
-  c.font = `${Math.round(H * 0.045)}px system-ui, sans-serif`;
-  tabs.forEach((t, i) => {
-    const on = i === (side ? 4 : (st.onGround ? 0 : 1));
-    c.fillStyle = on ? '#2b4f74' : '#18222d'; c.fillRect(W * 0.03 + i * W * 0.19, H * 0.14, W * 0.18, H * 0.08);
-    c.fillStyle = on ? '#fff' : '#8aa0b6'; c.textAlign = 'center'; c.fillText(t, W * 0.12 + i * W * 0.19, H * 0.18);
-  });
+  c.textBaseline = 'middle'; c.textAlign = 'center';
+  const fs = Math.round(H * 0.042);
+  for (const k of oisButtons(W, H, side)) {
+    c.fillStyle = k.readout ? '#05080c' : k.on ? '#2b5f8f' : k.tab ? '#16202b' : '#1b2633';
+    c.fillRect(k.x, k.y, k.w, k.h);
+    if (!k.tab && !k.readout) { c.strokeStyle = k.on ? '#6fc8ff' : '#33465a'; c.lineWidth = 2; c.strokeRect(k.x + 1, k.y + 1, k.w - 2, k.h - 2); }
+    c.font = `600 ${k.readout ? Math.round(fs * 1.1) : fs}px system-ui, sans-serif`;
+    c.fillStyle = k.readout ? '#3ccfff' : k.on ? '#ffffff' : '#9fb4c8';
+    c.fillText(k.readout ? `${k.label} NM` : k.label, k.x + k.w / 2, k.y + k.h / 2 + 1);
+  }
+  const th = H * 0.1, top = H * OIS_TOP;
+  c.font = `600 ${Math.round(fs * 0.9)}px system-ui, sans-serif`; c.fillStyle = '#5f7a94'; c.textAlign = 'left';
+  c.fillText(side ? 'OIS · F/O' : 'OIS · CAPT', W * 0.03, top * 0.55); c.textAlign = 'center';
+  if (o.tab === 'MAP') {
+    // the map: the A320's ND drawing in its 324 × 324, scaled into the left part
+    const S = Math.min(W * 0.70, H - th - top - 4), k = S / 324, x = (W * 0.705 - S) / 2, y = top + (H - th - top - 4 - S) / 2;
+    const M = FM();
+    c.save(); c.translate(x, y); c.scale(k, k);
+    c.beginPath(); c.rect(0, 0, 324, 324); c.clip();
+    c.fillStyle = '#000'; c.fillRect(0, 0, 324, 324);
+    if (M && M.drawNd) M.drawNd(c, side, { nd: o.nd, terr: o.terr, slot: 2 + side });
+    else { c.fillStyle = '#ffb000'; c.font = '600 16px system-ui, sans-serif'; c.fillText('MAP NOT AVAIL', 162, 162); }
+    c.restore();
+    return;
+  }
   c.textAlign = 'left';
-  const rows = side
+  const rows = o.tab === 'CHECKLIST'
     ? [['BEFORE START', '✓'], ['BEFORE TAKEOFF', st.onGround ? '…' : '✓'], ['AFTER TAKEOFF', st.onGround ? '' : '✓'], ['APPROACH', ''], ['LANDING', ''], ['PARKING', '']]
-    : [['AIRCRAFT', st.name || 'A350'], ['WEIGHT', `${Math.round((st.mass || 0) / 1000)} t`], ['FLAPS', st.flaps || ''], ['V1 / VR / V2', st.vr ? `${st.vr - 4} / ${st.vr} / ${st.vr + 8}` : '—'], ['THR', st.thr || ''], ['ALT', `${Math.round((st.h || 0) / 0.3048)} ft`]];
+    : o.tab === 'LDG PERF'
+      ? [['AIRCRAFT', st.name || 'A350'], ['LANDING WEIGHT', `${Math.round((st.mass || 0) / 1000)} t`], ['FLAPS', 'FULL'], ['VAPP', st.vr ? `${Math.round(st.vr * 0.93)} kt` : '—'], ['AUTOBRAKE', 'MED'], ['ALT', `${Math.round((st.h || 0) / 0.3048)} ft`]]
+      : [['AIRCRAFT', st.name || 'A350'], ['WEIGHT', `${Math.round((st.mass || 0) / 1000)} t`], ['FLAPS', st.flaps || '1+F'], ['V1 / VR / V2', st.vr ? `${st.vr - 4} / ${st.vr} / ${st.vr + 8}` : '—'], ['THR', st.thr || 'TOGA'], ['ALT', `${Math.round((st.h || 0) / 0.3048)} ft`]];
   c.font = `${Math.round(H * 0.05)}px system-ui, sans-serif`;
   rows.forEach(([k, val], i) => {
-    const y = H * (0.31 + i * 0.105);
-    c.fillStyle = '#16202b'; c.fillRect(W * 0.03, y - H * 0.045, W * 0.94, H * 0.09);
-    c.fillStyle = '#c9d6e2'; c.fillText(k, W * 0.06, y);
-    c.fillStyle = val === '✓' ? '#30d158' : '#4fd6ff'; c.textAlign = 'right'; c.fillText(val, W * 0.94, y); c.textAlign = 'left';
+    const yy = H * (0.2 + i * 0.115);
+    c.fillStyle = '#16202b'; c.fillRect(W * 0.03, yy - H * 0.045, W * 0.94, H * 0.09);
+    c.fillStyle = '#c9d6e2'; c.fillText(k, W * 0.06, yy);
+    c.fillStyle = val === '✓' ? '#30d158' : '#4fd6ff'; c.textAlign = 'right'; c.fillText(val, W * 0.94, yy); c.textAlign = 'left';
   });
+}
+// A click on an OIS: its button under the place clicked (the face's uv: u across, v up)
+function oisPanel(side, cv) {
+  return {
+    hit(uv) {
+      const x = uv.x * cv.width, y = (1 - uv.y) * cv.height;
+      const k = oisButtons(cv.width, cv.height, side).find((q) => q.click && x >= q.x && x <= q.x + q.w && y >= q.y && y <= q.y + q.h);
+      return k ? { c: { tip: k.tip, click: k.click }, fx: 0, fy: 0 } : null;
+    },
+    paint() { paintedAt = 0; },
+  };
 }
 // The PFD with the FMA above it (the FMGC's), in W × H.
 function pfdScreen(c, W, H, P) {
@@ -1499,7 +1720,7 @@ function paintScreens(now, P) {
     else if (sc.kind === 'sd') sdScreen(c, W, H, P);
     else if (sc.kind === 'isis') isis(c, W, H, info);
     else if (sc.kind === 'stby3') stby3(c, W, H, info);
-    else ois(c, W, H, info, sc.kind === 'ois-f');
+    else ois(c, W, H, info, sc.kind === 'ois-f' ? 1 : 0);
     finish(c, W, H, sc);
     if (D.crt && sc.kind !== 'stby3') crtLook(c, W, H);
     sc.tex.needsUpdate = true;
@@ -1553,6 +1774,7 @@ function pick(ev) {
   if (!hit) return null;
   const u = hit.object.userData;
   if (u.click) return { c: u.click, fx: 0, fy: 0 };
+  if (u.fgNode && MCDU_KEYS.has(u.fgNode)) return { c: mcduKey(u.fgNode), fx: 0, fy: 0 };
   if (u.fgNode && pit.fg && pit.fg.deck) {
     // (FlightGear's deck: the node's controls; left click, right click (its middle button), the wheel. A click that
     // does nothing there goes on to the control behind it: a guard's pushbutton is in front of the guard's hinge)
@@ -1633,10 +1855,10 @@ export function draw(renderer, gl, { sunB, day, fov, look, lookDown }) {
   if (!P || !P.active) return;
   const kind = kindOf(P.type) || 'a350', nEng = (P.state.spec && P.state.spec.engines) || 2;
   // (the A320s, A330s and A340s: FlightGear's real deck once its pack has come, the deck built here until then)
-  const real = fgKind(kind);
-  if (real && !fg.pack) fgLoad();
-  const key = `${real && fg.pack ? 'fg-' : ''}${kind}${nEng}`;
-  if (!pits[key]) pits[key] = real && fg.pack ? buildFg(kind, nEng) : build(kind, nEng);
+  const real = fgKind(kind), grafted = graftKind(kind);
+  if ((real || grafted) && !fg.pack) fgLoad();
+  const key = `${real && fg.pack ? 'fg-' : grafted && fg.pack ? 'g-' : ''}${kind}${nEng}`;
+  if (!pits[key]) pits[key] = real && fg.pack ? buildFg(kind, nEng) : grafted && fg.pack ? graft(build(kind, nEng, true)) : build(kind, nEng);
   const was = pit;
   pit = pits[key];
   useDeck(kind);
@@ -1653,7 +1875,9 @@ export function draw(renderer, gl, { sunB, day, fov, look, lookDown }) {
   if (fcuEl && !fcuEl.hidden && FG.fcu) { fcuHidden = true; FG.fcu.show(false); }
   paintScreens(now, P);
   if (now - panelsAt > 100) { panelsAt = now; for (const p of pit.panels) p.paint(); }
-  if (pit.fg) fgSync(dt); else poseControls(P.state);
+  paintMcdus(now);
+  if (pit.fg) fgSync(dt);
+  if (pit.levers) poseControls(P.state);
   // light: the sky, the sun, and the cockpit's own (dome, flood, the panels' integral lighting: INT LT)
   const sys = SYS();
   const L = sys ? sys.S.lt : null;

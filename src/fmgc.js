@@ -838,7 +838,7 @@
   // EGPWS terrain: heights round the aircraft looked up every few seconds (FG.flat), painted by how high they are
   // against the aircraft: red more than 2000 ft above, amber up to 500 ft below, green to 2000 ft below
   // (each ND its own: the two can be at different ranges)
-  const terrs = [null, null], terrBusy = [false, false];
+  const terrs = [null, null, null, null], terrBusy = [false, false, false, false]; // (2, 3: the A350's side screens' maps)
   function drawTerrain(c, here, up, range, xy, ppn, side) {
     const now = performance.now(), terr = terrs[side];
     if (FG.flat && !terrBusy[side] && (!terr || now - terr.at > 3000 || terr.range !== range || gcDist(here, terr.c) > range / 8)) {
@@ -867,7 +867,7 @@
     });
   }
   // VOR.D / NDB: the navaids (src/data/navdata.js); WPT: the towns the MCDU knows as waypoints
-  const opts = [{ list: null, at: 0, key: '' }, { list: null, at: 0, key: '' }];
+  const opts = [0, 1, 2, 3].map(() => ({ list: null, at: 0, key: '' }));
   function drawOpt(c, here, range, xy, nd, side) {
     const now = performance.now(), key = `${nd.opt}|${range}`, O = opts[side];
     let optList = O.list;
@@ -946,12 +946,13 @@
       c.beginPath(); c.moveTo(cx + dx * r0, cy + dy * r0); c.lineTo(cx + dx * (r0 - 10) - dy * 5, cy + dy * (r0 - 10) + dx * 5); c.lineTo(cx + dx * (r0 - 10) + dy * 5, cy + dy * (r0 - 10) - dx * 5); c.closePath(); c.fillStyle = col; c.fill();
     }
   }
-  const ndAir = [{ list: null, at: 0, range: 0 }, { list: null, at: 0, range: 0 }];
+  const ndAir = [0, 1, 2, 3].map(() => ({ list: null, at: 0, range: 0 }));
   // side: 0 the captain's ND, 1 the first officer's (each as its own EFIS panel sets it)
-  function drawNd(c, side = 0) {
+  // own: another map with its own settings ({ nd, terr, slot }: the A350's side screens, src/cockpit3d.js), not the ND
+  function drawNd(c, side = 0, own = null) {
     const W = 324, H = 324;
-    side = side ? 1 : 0;
-    const nd = F.nds[side];
+    side = own ? own.slot : side ? 1 : 0;
+    const nd = own ? own.nd : F.nds[side];
     // the RANGE knob at ZOOM: the airport map (src/oans.js)
     if (nd.range < 10 && FG.oans) { FG.oans.draw(c, nd, side); return; }
     c.save();
@@ -971,7 +972,7 @@
     c.textBaseline = 'middle';
     // the terrain under everything else, with this side's TERR ON ND; never on the north-up PLAN
     const SY = FG.systems && FG.systems.S;
-    if (SY && SY.misc && SY.misc.terrNd[side] && !plan) drawTerrain(c, here, up, range, xy, ppn, side);
+    if ((own ? own.terr : SY && SY.misc && SY.misc.terrNd[side]) && !plan) drawTerrain(c, here, up, range, xy, ppn, side);
     // compass
     c.strokeStyle = WHITE; c.fillStyle = WHITE; c.lineWidth = 1.2; c.font = '11px ui-monospace, Consolas, monospace'; c.textAlign = 'center';
     c.beginPath(); c.arc(cx, cy, rad, 0, Math.PI * 2); c.stroke();

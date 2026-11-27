@@ -143,8 +143,9 @@ you fly, the keyboard is the plane's (the game's keys come back when you leave):
   keys, Esc opens a menu (the flight waits): resume, start this flight again, or leave the cockpit.
 - The A350s have a 3D flight deck in the cockpit camera: the six screens show the PFD and navigation display, the engine
   and warning display, the wheel page and the information system; the thrust levers, side-sticks, gear lever, flap and
-  speed brake levers move, the sun shines in and the panels light up at night. Drag to look round (double click: ahead
-  again); I puts the big PFD and engine display over the view as well.
+  speed brake levers move, the sun shines in and the panels light up at night. Its FCU, EFIS panels and MCDUs are the
+  A320's real 3D ones (below), and the information systems beside each pilot have a MAP page with its own settings.
+  Drag to look round (double click: ahead again); I puts the big PFD and engine display over the view as well.
 - Checkpoints: Z (or ⚑ Checkpoint) keeps the flight as it is now; Backspace (or ⟲ Retry, or from the menu or after
   a crash) puts it back there, paused until P, as often as it takes: practise a landing until it works. The
   checkpoint stays when the flight starts again and goes with a new flight.
@@ -213,6 +214,17 @@ that does nothing on a control goes on to the one behind it: a guarded pushbutto
 are drawn on its six screens and its standby instrument. Until the pack has come (7 MB), or with `?built` in the
 address, they fly with the deck built here from the panel modules (six square screens: FMA + PFD, ND, the E/WD over
 the SD, ND, PFD; the MCDUs on the pedestal). Drag to look round; look up and to the right for the overhead panel.
+
+The A350s and the A380 keep their own deck, with the A320's real 3D modules from that pack in it (`graft` in
+`src/cockpit3d.js`): the FCU in the middle of the glareshield (its knobs, buttons and number windows), an EFIS panel
+before each pilot (the ND's MODE, RANGE, CSTR · WPT · VOR.D · NDB · ARPT, LS, FD, the VOR/ADF needles), and the
+two MCDUs on the front of the pedestal, where the A350 has its keyboards: their screens show the MCDU's pages and
+their keys type into it (a click on the screen opens the big MCDU, Y, to type on the keyboard). MASTER WARN and CAUT
+stay the A350's. The information system (OIS) beside each pilot has tabs along its bottom: MAP is the A320's
+navigation map (the airport map under 10 NM) with its own settings beside it, apart from the pilot's ND (RANGE − / +,
+ARC · ROSE · PLAN, AIRPORT, CSTR · WPT · VOR.D · NDB · ARPT, TERR, and = ND to take the ND's); T.O PERF, LDG PERF and
+CHECKLIST are the flight's papers. Until the pack has come, or with `?built`, the A350's painted FCU, EFIS and
+keyboards stand in.
 
 Each version keeps its own on the screens and on the overhead (0) and pedestal (9) pages (`src/panels.js` LAYOUTS;
 the built deck has them in 3D too):

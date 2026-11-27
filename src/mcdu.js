@@ -527,5 +527,28 @@
     clearInterval(timer);
     if (on) { render(); timer = setInterval(render, 250); } else if (document.activeElement === kbd) kbd.blur();
   }
-  FG.mcdu = { show, toggle() { if (!FG.fmgc.on) return; show(!el || el.hidden); }, get open() { return !!el && !el.hidden; } };
+  // The same pages on a canvas (the 3D MCDUs' screens: src/cockpit3d.js), W × H: the title, twelve lines, the
+  // scratchpad, 24 columns; and their keys: press('lsk', 'L1'), press('f', 'F-PLN'), press('k', 'A').
+  function draw(c, W, H) {
+    c.fillStyle = '#04070a'; c.fillRect(0, 0, W, H);
+    if (!FG.fmgc.on) return;
+    const { title, L } = page();
+    const row = H / 14.2, fs = Math.round(row * 0.86), x0 = W * 0.03, x1 = W * 0.97;
+    c.textBaseline = 'middle';
+    const line = (y, l, r, small) => {
+      c.font = `${small ? 500 : 600} ${Math.round(small ? fs * 0.78 : fs)}px ui-monospace, Consolas, monospace`;
+      c.textAlign = 'left'; c.fillStyle = l[1]; c.fillText(l[0], x0, y);
+      c.textAlign = 'right'; c.fillStyle = r[1]; c.fillText(r[0], x1, y);
+    };
+    c.font = `600 ${fs}px ui-monospace, Consolas, monospace`; c.textAlign = 'center'; c.fillStyle = C.w;
+    c.fillText(title, W / 2, row * 0.7);
+    L.forEach((ln, i) => line(row * (1.75 + i), ln.l, ln.r, i % 2 === 0));
+    line(row * 13.6, [st.msg || st.pad, st.msg ? C.a : C.w], ['', C.w]);
+  }
+  function press(kind, k) {
+    if (!FG.fmgc.on) return;
+    if (kind === 'lsk') lskPress(k); else if (kind === 'f') fkey(k); else key(k);
+    render();
+  }
+  FG.mcdu = { show, draw, press, toggle() { if (!FG.fmgc.on) return; show(!el || el.hidden); }, get open() { return !!el && !el.hidden; } };
 })();

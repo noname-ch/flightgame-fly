@@ -875,6 +875,9 @@ export const LAYOUTS = {
   },
 };
 LAYOUTS.a350.overhead = LAYOUTS.a320.overhead;
+// The A350 with the A320's real 3D modules (src/cockpit3d.js graft: FlightGear's FCU, EFIS panels
+// and MCDUs): on its glareshield only MASTER WARN / CAUT painted, the MCDUs where the keyboards were.
+LAYOUTS.a350g = { ...LAYOUTS.a350, glareshield: LAYOUTS.a350.glareshield.filter((l) => l[0] === 'warn'), pedestal: LAYOUTS.a350.pedestal.filter((l) => l[0] !== 'kccu') };
 // The A330s and A340s: the A320's deck (the same modules, the same places), with their own overhead HYD (no PTU)
 // and FUEL (a standby pump per wing and the trim tank on the A330; a feed tank, two pumps and a cross-feed valve per
 // engine on the A340) and what each version added:
