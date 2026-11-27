@@ -158,6 +158,9 @@ rate; over 1,100 ft/min, gear up, a wing down or nose first is a crash (Enter tr
   - Click to **push**: managed, the FMGC flies it (a dot in the window). On V/S, push levels off.
   - Right-click to **pull**: selected, the window's value.
   - The ‹ › PUSH PULL buttons do the same.
+  - In the 3D flight deck the FCU's own windows show the numbers too (the A320s, A330s and A340s: in seven-segment
+    digits where FlightGear puts its text; dashes and the managed dots as the real FCU has them; dark without power,
+    8s for ANN LT TEST, dimmed by the FCU's display brightness knob).
 - **Buttons:** SPD MACH, LOC, AP1, AP2, A/THR, EXPED, APPR, HDG-V/S / TRK-FPA, the 100/1000 ft switch.
 - **AUTO BRK:** LO, MED, MAX.
 

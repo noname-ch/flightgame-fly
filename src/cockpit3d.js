@@ -589,6 +589,8 @@ function buildFg(kind, nEng) {
     root.add(new THREE.Mesh(geoOf(s, uv), mat));
     screens.push({ kind: kindS, cv, ctx: cv.getContext('2d'), tex, side: s.n ? 1 : 0 });
   }
+  // the FCU's number windows
+  const fcuTxt = def ? fcuDigits(root) : null;
   // lights: the sky through the windows, the sun, the dome light and the flood light under the glareshield
   const hemi = new THREE.HemisphereLight(0xdfeaff, 0x3a3630, 1.2);
   const sun = new THREE.DirectionalLight(0xfff3e0, 1.6);
@@ -598,7 +600,93 @@ function buildFg(kind, nEng) {
   { const s = pack.screens.find((x) => x.screen === 'engines'); let y = 0.7, z = -0.2; if (s) { y = 0; z = 0; for (let i = 0; i < s.pos.length; i += 3) { y += s.pos[i + 1]; z += s.pos[i + 2]; } y /= s.pos.length / 3; z /= s.pos.length / 3; } flood.position.set(0, y - 0.3, z + 0.12); }
   const scene = new THREE.Scene();
   scene.add(root, hemi, sun, sun.target, amb, dome, flood);
-  return { kind, nEng, eyeX: cx, D, scene, screens, lit: [], panels: [], clickables, hemi, sun, amb, dome, flood, fg: { deck, nodes, mats, gen: -1, glow: -1 } };
+  return { kind, nEng, eyeX: cx, D, scene, screens, lit: [], panels: [], clickables, hemi, sun, amb, dome, flood, fg: { deck, nodes, mats, gen: -1, glow: -1, fcuTxt } };
+}
+// The FCU's number windows (SPD/MACH, HDG/TRK, ALT, V/S/FPA). FlightGear draws them as text in a seven-segment font
+// (a320.flightdeck.xml: spd-text, hdg-text, alt-text, vs-text, vs-text-last-2-digits, fpa-text), and the pack has no
+// text: here one canvas on the FCU's face where those texts sit. Their places are in FlightGear's flight deck frame
+// (x aft, y right, z up; pack = (y + 0.45, 0.281 - x, z - 0.70): the A320's eye in src/fgcockpit.rs), the face
+// leaning back (roll 72.81°), the digits 8 mm high, one every 5 mm.
+const FCU_TXT = { x: -0.377, z: 0.50254, roll: 72.81, eye: [0.281, -0.45, 0.70], y0: -0.12, y1: 0.13, h: 0.016,
+  spd: -0.08943, hdg: -0.04941, alt: 0.0432, vs: 0.0850, oo: 0.0977, fpa: 0.0860, em: 0.008, adv: 0.005 };
+const FCU_PX = 8192; // (canvas pixels a metre)
+function fcuDigits(root) {
+  const T = FCU_TXT, r = T.roll * Math.PI / 180;
+  const cv = canvas(Math.round((T.y1 - T.y0) * FCU_PX), Math.round(T.h * FCU_PX)), tex = texture(cv);
+  // (lit segments added to the dark window: black is nothing)
+  const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false,
+    side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4 });
+  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(T.y1 - T.y0, T.h), mat);
+  // (the plane's x to the right, its y up the face, its normal out towards the eye; half a millimetre off the face)
+  const up = new THREE.Vector3(0, Math.cos(r), Math.sin(r)), out = new THREE.Vector3(0, -Math.sin(r), Math.cos(r));
+  mesh.matrix.makeBasis(new THREE.Vector3(1, 0, 0), up, out);
+  mesh.matrix.setPosition(new THREE.Vector3((T.y0 + T.y1) / 2 - T.eye[1], T.eye[0] - T.x, T.z - T.eye[2]).addScaledVector(out, 0.0005));
+  mesh.matrixAutoUpdate = false;
+  mesh.renderOrder = 2;
+  root.add(mesh);
+  return { cv, ctx: cv.getContext('2d'), tex, key: '' };
+}
+// seven segments: a top, b top right, c bottom right, d bottom, e bottom left, f top left, g middle
+const SEG7 = { 0: 'abcdef', 1: 'bc', 2: 'abdeg', 3: 'abcdg', 4: 'bcfg', 5: 'acdfg', 6: 'acdefg', 7: 'abc', 8: 'abcdefg', 9: 'abcdfg', '-': 'g', '+': 'g+', o: 'cdeg' };
+function seg7(c, ch, x, y, w, h, t) {
+  const segs = SEG7[ch];
+  if (!segs) return;
+  const k = t / 2, gap = t * 0.3;
+  const hor = (x0, x1, yy) => { c.moveTo(x0 + gap, yy); c.lineTo(x0 + gap + k, yy - k); c.lineTo(x1 - gap - k, yy - k); c.lineTo(x1 - gap, yy); c.lineTo(x1 - gap - k, yy + k); c.lineTo(x0 + gap + k, yy + k); c.closePath(); };
+  const ver = (xx, y0, y1) => { c.moveTo(xx, y0 + gap); c.lineTo(xx + k, y0 + gap + k); c.lineTo(xx + k, y1 - gap - k); c.lineTo(xx, y1 - gap); c.lineTo(xx - k, y1 - gap - k); c.lineTo(xx - k, y0 + gap + k); c.closePath(); };
+  const L = x + k, R = x + w - k, Tp = y + k, M = y + h / 2, B = y + h - k;
+  c.beginPath();
+  if (segs.includes('a')) hor(L, R, Tp);
+  if (segs.includes('b')) ver(R, Tp, M);
+  if (segs.includes('c')) ver(R, M, B);
+  if (segs.includes('d')) hor(L, R, B);
+  if (segs.includes('e')) ver(L, M, B);
+  if (segs.includes('f')) ver(L, Tp, M);
+  if (segs.includes('g')) hor(L, R, M);
+  if (segs.includes('+')) ver((L + R) / 2, M - (M - Tp) * 0.8, M + (B - M) * 0.8);
+  c.fill();
+}
+// a string centred at y (FlightGear's y, metres): a digit every `adv`, the point narrow
+function fcuText(c, str, yc, small = false) {
+  const T = FCU_TXT, px = FCU_PX, H = c.canvas.height;
+  const h = T.em * 0.88 * px * (small ? 0.9 : 1), w = h * 0.54, t = h * 0.135, a = T.adv * px;
+  const adv = (ch) => (ch === '.' ? a * 0.4 : a);
+  let x = (yc - T.y0) * px - [...str].reduce((s, ch) => s + adv(ch), 0) / 2;
+  const top = H / 2 - h / 2;
+  for (const ch of str) {
+    if (ch === '.') c.fillRect(x + adv(ch) / 2 - t * 0.6, top + h - t * 1.2, t * 1.2, t * 1.2);
+    else seg7(c, ch, x + (a - w) / 2, top, w, h, t);
+    x += adv(ch);
+  }
+}
+// the windows painted (only when what they show changed): nothing without power, 8s for ANN LT TEST, else the
+// FCU's values (src/fcu.js windows(); dashes where null are the model's own), as bright as the FCU's DISPLAY knob
+function fcuPaint(x, d, w) {
+  const T = FCU_TXT;
+  const on = d.get('systems/electrical/bus/ac-ess-shed') >= 110 && d.get('FMGC/FCU-working') === 1;
+  const test = on && d.get('controls/switches/annun-test') === 1;
+  const k = Math.max(0, Math.min(1, d.get('controls/lighting/fcu-digit-norm')));
+  const key = !on ? 'off' : test ? `test${k.toFixed(2)}` : w ? `${w.spd}|${w.hdg}|${w.alt}|${w.vs}|${k.toFixed(2)}` : 'none';
+  if (key === x.key) return;
+  x.key = key;
+  const c = x.ctx, W = x.cv.width, H = x.cv.height;
+  c.clearRect(0, 0, W, H);
+  c.fillStyle = '#000'; c.fillRect(0, 0, W, H);
+  if (on && (test || w) && k > 0.01) {
+    const b = 0.25 + 0.75 * k;
+    c.fillStyle = `rgb(${Math.round(255 * b)},${Math.round(140 * b)},${Math.round(30 * b)})`;
+    c.shadowColor = `rgba(255,120,0,${0.6 * b})`; c.shadowBlur = H * 0.06;
+    if (test) { fcuText(c, '888', T.spd); fcuText(c, '888', T.hdg); fcuText(c, '88888', T.alt); fcuText(c, '+88', T.vs); fcuText(c, '88', T.oo); }
+    else {
+      if (w.spd != null) fcuText(c, w.spd, T.spd);
+      if (w.hdg != null) fcuText(c, w.hdg, T.hdg);
+      fcuText(c, w.alt, T.alt);
+      if (w.vs != null && w.vs.endsWith('oo')) { fcuText(c, w.vs.slice(0, -2), T.vs); fcuText(c, 'oo', T.oo, true); }
+      else if (w.vs != null) fcuText(c, w.vs, T.fpa);
+    }
+    c.shadowBlur = 0;
+  }
+  x.tex.needsUpdate = true;
 }
 // The FlightGear flight deck's switches from the systems, and its clicks to them: FlightGear's A320 properties
 // (switches 0 / 0.5 / 1 from the bottom up; momentary buttons a pulse on their *-translate).
@@ -744,6 +832,8 @@ function fgSync(dt) {
       default:
     }
   }
+  // what the FCU's windows show (after its knobs' clicks)
+  const fcuW = FG.fcu && FG.fcu.windows ? FG.fcu.windows() : null;
   // the switches as the systems have them (set on the overhead page, by the keys or by the systems)
   if (y && y.S && y.S.elec) {
     const S = y.S, b = (v) => (v ? 1 : 0), tri = (v, a, m) => (v === a ? 0 : v === m ? 0.5 : 1), n = S.eng.length;
@@ -850,12 +940,30 @@ function fgSync(dt) {
     d.set('it-autoflight/output/loc-arm', M.F.locBtn || M.F.appr ? 1 : 0); d.set('it-autoflight/output/gs-arm', M.F.appr ? 1 : 0);
     d.set('controls/autobrake/mode', { LO: 1, MED: 2, MAX: 3 }[M.F.abrk] || 0);
     if (M.F.nd) { d.set('instrumentation/efis/inputs/range-nm', M.F.nd.range); d.set('instrumentation/efis[1]/inputs/range-nm', M.F.nd.range); }
+    // (the FCU's labels, dashes and managed dots: FlightGear's rules light them from these: SPD or MACH, HDG V/S or
+    // TRK FPA, dashes where a window shows none, the dots for managed speed, NAV and the managed altitude)
+    if (fcuW) {
+      d.set('it-autoflight/input/kts-mach', fcuW.mach ? 1 : 0);
+      d.set('it-autoflight/custom/show-spd', fcuW.spd != null ? 1 : 0);
+      d.set('it-autoflight/custom/show-hdg', fcuW.hdg != null ? 1 : 0);
+      d.set('it-autoflight/custom/trk-fpa', fcuW.trkFpa ? 1 : 0);
+      d.set('it-autoflight/internal/managed-mode-on', fcuW.altMgd ? 1 : 0);
+    }
+    // (FlightGear's mode numbers: lateral 0 HDG/TRK, 1 NAV, 2 LOC, 5 runway, 9 none; vertical 0 ALT, 1 V/S, 2 G/S,
+    // 3 ALT*, 4 the climbs and descents, 5 FPA, 6 LAND, 9 none)
+    const lat = M.F.lat, vert = M.F.vert, LANDING = ['LAND', 'FLARE', 'ROLL OUT'];
+    d.set('it-autoflight/output/lat', lat === 'NAV' ? 1 : lat === 'LOC*' || lat === 'LOC' || LANDING.includes(lat) ? 2 : lat === 'HDG' || lat === 'TRK' ? 0 : lat ? 5 : 9);
+    d.set('it-autoflight/output/lnav-arm', M.F.latArm === 'NAV' ? 1 : 0);
+    d.set('it-autoflight/output/vert', vert === 'V/S' ? 1 : vert === 'FPA' ? 5 : vert === 'G/S*' || vert === 'G/S' ? 2 : LANDING.includes(vert) ? 6 : vert === 'ALT' ? 0 : vert === 'ALT*' ? 3 : vert ? 4 : 9);
   }
+  // (the FCU's DISPLAY brightness knob dims its windows and labels)
+  d.set('controls/lighting/fcu-digit-norm', d.get('controls/lighting/fcu-digit-knb'));
   if (y && y.S && y.S.misc) {
     const pg = y.S.misc.ecp;
     for (const [key, p] of [['APU', 'apu'], ['BLEED', 'bleed'], ['COND', 'cond'], ['DOOR', 'door'], ['ELEC', 'elec'], ['ENG', 'eng'], ['F/CTL', 'fctl'], ['FUEL', 'fuel'], ['HYD', 'hyd'], ['PRESS', 'press'], ['WHEEL', 'wheel'], ['STS', 'sts']]) d.set(`ECAM/Lower/light/${p}`, pg === key ? 1 : 0);
   }
   d.step(dt);
+  if (f.fcuTxt) fcuPaint(f.fcuTxt, d, fcuW);
   // every node posed (only when a pose changed)
   if (d.gen !== f.gen) {
     f.gen = d.gen;

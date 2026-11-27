@@ -258,7 +258,7 @@ try {
 
   step('its 3D flight deck: FlightGear\'s real A320 deck (cockpits/A320-family.fgck), six screens and the standby instrument');
   await evaluate(() => { FG.pilot.state.cam = 'cockpit'; FG.view3d.pilotCam('cockpit'); });
-  await waitFor(() => { FG.view3d.map.triggerRepaint(); return FG.cockpit3d.pit && FG.cockpit3d.pit.kind === 'a320' && FG.cockpit3d.pit.fg; }, 40000, 'the A320\'s FlightGear deck to be drawn');
+  await waitFor(() => { FG.view3d.map.triggerRepaint(); return FG.cockpit3d.pit && FG.cockpit3d.pit.kind === 'a320' && !!FG.cockpit3d.pit.fg; }, 40000, 'the A320\'s FlightGear deck to be drawn');
   const deck = await evaluate(() => ({ screens: FG.cockpit3d.pit.screens.map((x) => x.kind), controls: FG.cockpit3d.pit.clickables.length, eyeX: FG.cockpit3d.EYE_X, fcuHidden: !FG.fcu || !document.getElementById('fcu') || document.getElementById('fcu').hidden }));
   if (deck.screens.join() !== 'pfd,nd,ewd,sd,nd,pfd,isis' || deck.controls < 300 || !(deck.eyeX > 0.3 && deck.eyeX < 0.7)) errors.push(`the A320 deck: ${JSON.stringify(deck)}`);
   if (!await waitFor(() => { const f = document.getElementById('fcu'); return !f || f.hidden; }, 4000)) {

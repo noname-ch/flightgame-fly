@@ -97,36 +97,44 @@
   }
 
   const pad = (n, w) => String(Math.round(n)).padStart(w, '0');
+  const LAT_MGD = ['NAV', 'LOC*', 'LOC', 'LAND', 'FLARE', 'ROLL OUT'];
+  // What the FCU's four windows show (this panel and the 3D flight deck's FCU): null where it shows dashes. A value
+  // turned in while managed (a preset) shows for 10 s.
+  function windows() {
+    if (performance.now() - F.fcu.presetAt > 10000) { F.fcu.spdPreset = null; F.fcu.hdgPreset = null; }
+    const spdMgd = s.spdSel == null && s.machSel == null;
+    const hdgMgd = F.hdgMgd || LAT_MGD.includes(F.lat);
+    let spd = null;
+    if (F.fcu.spdPreset != null) spd = pad(F.fcu.spdPreset, 3);
+    else if (s.machSel != null) spd = `.${pad(s.machSel * 100, 2)}`;
+    else if (!spdMgd) spd = pad(s.spdSel, 3);
+    const hdg = F.fcu.hdgPreset != null ? pad(F.fcu.hdgPreset, 3) : hdgMgd ? null : pad(F.fcu.hdg % 360, 3);
+    // (V/S: hundreds of feet a minute, the last two digits the small "oo")
+    const vs = F.vert === 'V/S' ? `${F.fcu.vs < 0 ? '-' : '+'}${pad(Math.abs(F.fcu.vs) / 100, 2)}oo`
+      : F.vert === 'FPA' ? `${F.fcu.fpa < 0 ? '-' : '+'}${Math.abs(F.fcu.fpa).toFixed(1)}` : null;
+    return { spd, spdMgd, mach: s.machSel != null, hdg, hdgMgd, alt: pad(F.fcu.alt, 5), altMgd: !!F.altMgd, vs, trkFpa: !!F.fcu.trkFpa };
+  }
   function refresh() {
     if (!el || el.hidden) return;
-    const now = performance.now();
-    if (now - F.fcu.presetAt > 10000) { F.fcu.spdPreset = null; F.fcu.hdgPreset = null; }
     const q = (sel) => el.querySelector(sel);
     const set = (sel, txt) => { const n = q(sel); if (n.textContent !== txt) n.textContent = txt; };
     const light = (id, on) => { const n = q(`[data-btn="${id}"]`); if (n) n.classList.toggle('lit', !!on); };
     const lbl = (id, on) => q(`[data-l="${id}"]`).classList.toggle('on', !!on);
+    const w = windows();
     // SPD / MACH
-    const managed = s.spdSel == null && s.machSel == null;
-    if (F.fcu.spdPreset != null) set('[data-w="spd"]', pad(F.fcu.spdPreset, 3));
-    else if (managed) set('[data-w="spd"]', '---');
-    else if (s.machSel != null) set('[data-w="spd"]', `.${pad(s.machSel * 100, 2)}`);
-    else set('[data-w="spd"]', pad(s.spdSel, 3));
-    q('[data-d="spd"]').classList.toggle('on', managed);
-    lbl('SPD', s.machSel == null); lbl('MACH', s.machSel != null);
+    set('[data-w="spd"]', w.spd ?? '---');
+    q('[data-d="spd"]').classList.toggle('on', w.spdMgd);
+    lbl('SPD', !w.mach); lbl('MACH', w.mach);
     // HDG / TRK
-    const hdgMgd = F.hdgMgd || ['NAV', 'LOC*', 'LOC', 'LAND', 'FLARE', 'ROLL OUT'].includes(F.lat);
-    if (F.fcu.hdgPreset != null) set('[data-w="hdg"]', pad(F.fcu.hdgPreset, 3));
-    else set('[data-w="hdg"]', hdgMgd ? '---' : pad(F.fcu.hdg % 360, 3));
-    q('[data-d="hdg"]').classList.toggle('on', hdgMgd);
+    set('[data-w="hdg"]', w.hdg ?? '---');
+    q('[data-d="hdg"]').classList.toggle('on', w.hdgMgd);
     lbl('HDG', !F.fcu.trkFpa); lbl('TRK', F.fcu.trkFpa); lbl('HV', !F.fcu.trkFpa); lbl('TF', F.fcu.trkFpa);
     // ALT
-    set('[data-w="alt"]', pad(F.fcu.alt, 5));
-    q('[data-d="alt"]').classList.toggle('on', F.altMgd);
+    set('[data-w="alt"]', w.alt);
+    q('[data-d="alt"]').classList.toggle('on', w.altMgd);
     set('[data-btn="ALTINC"]', String(F.fcu.altInc));
     // V/S / FPA
-    if (F.vert === 'V/S') set('[data-w="vs"]', `${F.fcu.vs < 0 ? '-' : '+'}${pad(Math.abs(F.fcu.vs) / 100, 2)}oo`);
-    else if (F.vert === 'FPA') set('[data-w="vs"]', `${F.fcu.fpa < 0 ? '-' : '+'}${Math.abs(F.fcu.fpa).toFixed(1)}`);
-    else set('[data-w="vs"]', '-----');
+    set('[data-w="vs"]', w.vs ?? '-----');
     lbl('VS', !F.fcu.trkFpa); lbl('FPA', F.fcu.trkFpa);
     // lights
     light('AP1', F.ap1); light('AP2', F.ap2); light('ATHR', s.athr && s.spec && s.spec.athr);
@@ -151,5 +159,6 @@
       if (on) { refresh(); timer = setInterval(refresh, 100); }
     },
     refresh,
+    windows,
   };
 })();
