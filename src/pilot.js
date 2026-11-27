@@ -436,7 +436,7 @@
       conf: sp.toConf, flapPos: sp.toConf, sb: 0, gs: 0, armed: sp.groundSpoilers, brake: 0, parking: false, afloor: false,
       stick: 0, roll: 0, rud: 0, crashed: null, touch: null, tail: false, paused: false, calls: {}, near: null,
       hideId: opts.plane ? opts.plane.id : null, mass: sp.toMass, prevAgl: null, ghReal: null, ghAt: 0,
-      gref: null, aCmd: null, qCmd: 0, aTrim: null, deep: false, limiter: s.limiterPref !== false, p: 0, stalled: false, stallAmt: 0, buffet: 0, drop: 0, athr: sp.athr, spdSel: null, athrN1: null, iasPrev: null, iasAcc: 0, menu: false, lvrClb: false, sway: { p: 0, pv: 0, r: 0, rv: 0 }, vPrev: null, wind: null, track: null, gsMs: null,
+      gref: null, aCmd: null, qCmd: 0, aTrim: null, deep: false, limiter: s.limiterPref !== false, p: 0, stalled: false, stallAmt: 0, buffet: 0, qB: 0, wingSt: [false, false], wingAmt: [0, 0], wingRoll: 0, rig: (Math.random() - 0.5) * (sp.law === 'classic' ? 1.2 : 0.6), athr: sp.athr, spdSel: null, athrN1: null, iasPrev: null, iasAcc: 0, menu: false, lvrClb: false, sway: { p: 0, pv: 0, r: 0, rv: 0 }, vPrev: null, wind: null, track: null, gsMs: null,
       dmg: noDamage(), pieces: [], tumble: null, wreck: null, gone: false, flut: 0, overT: 0, dmgRoll: 0, ailAuth: 1,
       belly: false, burnAt: null, fire: null, scrape: 0,
     });
@@ -554,7 +554,7 @@
   // Z keeps the flight as it is now; Backspace puts it back there (paused, P to go on), as often as it takes.
   const CK = ['lat', 'lon', 'h', 'groundH', 'V', 'gamma', 'psi', 'theta', 'phi', 'alpha', 'onGround', 'landed', 'n1', 'lever',
     'rev', 'revOk', 'gearDown', 'gear', 'conf', 'flapPos', 'sb', 'gs', 'armed', 'brake', 'parking', 'afloor', 'tail', 'mass',
-    'gref', 'aCmd', 'qCmd', 'aTrim', 'deep', 'limiter', 'p', 'trimStart', 'stalled', 'stallAmt', 'buffet', 'drop', 'athr', 'spdSel', 'athrN1', 'iasPrev', 'iasAcc', 'lvrClb', 'sway', 'vPrev', 'ghReal', 'calls', 'prevAgl', 'dmg', 'pieces', 'tumble', 'wreck', 'gone', 'belly', 'burnAt', 'fire', 'scrape', 'flut', 'overT', 'dmgRoll', 'ailAuth', 'machSel', 'athrMode'];
+    'gref', 'aCmd', 'qCmd', 'aTrim', 'deep', 'limiter', 'p', 'trimStart', 'stalled', 'stallAmt', 'buffet', 'qB', 'wingSt', 'wingAmt', 'wingRoll', 'rig', 'athr', 'spdSel', 'athrN1', 'iasPrev', 'iasAcc', 'lvrClb', 'sway', 'vPrev', 'ghReal', 'calls', 'prevAgl', 'dmg', 'pieces', 'tumble', 'wreck', 'gone', 'belly', 'burnAt', 'fire', 'scrape', 'flut', 'overT', 'dmgRoll', 'ailAuth', 'machSel', 'athrMode'];
   function saveCheckpoint() {
     if (s.loading || s.crashed) { say('No checkpoint while crashed', 'amber', 2000); return; }
     const st = {};
@@ -800,20 +800,51 @@
     // (a delta wing has no sharp stall: the vortices over it go on lifting, less and less, up to about 35°)
     const aStall = (sp.delta ? 35 : (c.clmax - clBase) / CL_A) - K.stallDrop; // (ice on the wing: it stalls earlier)
     s.aProt = sp.delta ? sp.shakerA : aStall - 2;
-    // stalled, the flow breaks away from the wing: about a third of the lift goes within half a second, and it stays
-    // gone until the angle of attack is well back below the stall (stallAmt, set by conventionalLaw)
-    s.stallAmt += ((s.stalled ? 1 : 0) - s.stallAmt) * (1 - Math.exp(-dt / 0.4));
-    let CL;
-    if (sp.delta) {
-      const aK = (c.clmax - clBase) / CL_A; // (the lift slope halves past here: about 23°)
-      CL = clBase + CL_A * Math.min(s.alpha, aK) + 0.5 * CL_A * clamp(s.alpha - aK, 0, aStall - aK) - 0.04 * Math.max(0, s.alpha - aStall);
-    } else {
-      CL = Math.min(clBase + CL_A * s.alpha, c.clmax - K.stallDrop * CL_A);
-      if (s.alpha > aStall) CL -= 0.04 * (s.alpha - aStall);
+    // Each wing stalls on its own (s.wingSt, s.wingAmt: left, right). A wing meets the air at the aircraft's angle of
+    // attack plus what the roll adds (the wing going down meets the air from further below: roll rate × the arm of
+    // its lift ÷ the speed), plus what its aileron adds (a down aileron: more), plus the few tenths of a degree
+    // every airframe has between its two wings (s.rig). Past the critical angle its flow breaks away: about a third
+    // of its lift goes within half a second, and comes back only once its angle is 2° below the critical one.
+    // So the wing that stalls first drops, and as it rolls, its angle grows on while the other wing's shrinks: it
+    // goes on dropping until both are stalled or the roll is stopped (rudder; aileron against it only stalls that
+    // wing deeper). A delta wing has no break and no wing drop.
+    const hs = halfSpan(), arm = 0.5 * hs; // (the outer wing, where the stall starts and its lift rolls it most, m out)
+    const asym = !sp.delta && !s.onGround && !airbus();
+    const dA = asym ? (s.p * arm) / Math.max(30, V) : 0; // (°: roll rate °/s × m ÷ m/s)
+    const ailA = asym ? (sp.law === 'classic' ? 0.9 : 0.6) * s.roll * s.ailAuth : 0;
+    const rig = asym ? s.rig : 0;
+    const aW = [s.alpha - dA + ailA - rig / 2, s.alpha + dA - ailA + rig / 2];
+    const wingCL = (a, amt) => {
+      let cl;
+      if (sp.delta) {
+        const aK = (c.clmax - clBase) / CL_A; // (the lift slope halves past here: about 23°)
+        cl = clBase + CL_A * Math.min(a, aK) + 0.5 * CL_A * clamp(a - aK, 0, aStall - aK) - 0.04 * Math.max(0, a - aStall);
+      } else {
+        cl = Math.min(clBase + CL_A * a, c.clmax - K.stallDrop * CL_A);
+        if (a > aStall) cl -= 0.04 * (a - aStall);
+      }
+      cl *= 1 - 0.35 * amt;
+      // (far past the stall the air still pushes on the wing, the fuselage and the tail as on a flat plate, square to
+      // it: lift of about 1.1 at 30-45°, as wind tunnels measure on airliners)
+      if (!sp.delta && a > aStall) cl = Math.max(cl, 1.15 * Math.sin(2 * a * DEG));
+      return cl;
+    };
+    // (the separation spreads across the wing over the first 3° past the critical angle: a third of it at once)
+    for (let i = 0; i < 2; i++) {
+      const a = aW[i];
+      s.wingSt[i] = !s.onGround && (sp.delta ? a > aStall : s.wingSt[i] ? a > aStall - 2 : a > aStall);
+      const tgt = s.wingSt[i] ? (sp.delta ? 1 : clamp(0.35 + (a - aStall) / 3, 0.35, 1)) : 0;
+      s.wingAmt[i] += (tgt - s.wingAmt[i]) * (1 - Math.exp(-dt / 0.4));
     }
-    CL *= 1 - 0.35 * s.stallAmt;
-    // (far past the stall it still lifts as a flat plate does: most at 45°)
-    if (!sp.delta && s.alpha > aStall) CL = Math.max(CL, 0.9 * Math.sin(2 * s.alpha * DEG));
+    const stalled = s.wingSt[0] || s.wingSt[1];
+    if (stalled && !s.stalled) speak('stall');
+    s.stalled = stalled;
+    s.stallAmt = (s.wingAmt[0] + s.wingAmt[1]) / 2;
+    const clL = wingCL(aW[0], s.wingAmt[0]), clR = wingCL(aW[1], s.wingAmt[1]);
+    let CL = (clL + clR) / 2;
+    // the roll the two wings' lifts give beyond what an unstalled wing would (whose roll damping and ailerons
+    // rollLaw has already), in full aileron throws as dmgRoll: the right wing lifting less rolls it right
+    s.wingRoll = asym ? -((clR - clL) - CL_A * (aW[1] - aW[0])) * (arm / (4 * hs)) / CL_AIL : 0;
     CL -= 0.45 * spoil;
     // broken off: a wing that ends short lifts less (its share of an elliptical spread of lift), and the lift that is
     // left on the other side rolls it towards the broken one (lift lost × how far out it acted); with flaps out more
@@ -840,8 +871,11 @@
       const cphiL = Math.max(0.4, cphi); // (the law holds the path in a turn up to 2.5 g, about 66° of bank; steeper it sinks)
       const Ty = T * Math.sin(s.alpha * DEG);
       const alphaFor = (nz) => ((nz * W - Ty) / Math.max(1, q * sp.S) + 0.45 * spoil - clBase) / CL_A;
+      // how fast the path bends in the aircraft's own up direction (°/s): lift short of the weight's share there
+      // bends it down, away from the nose
+      const gL = ((L + Ty) - W * cg * cphi) / (m * Vs) / DEG;
       if (airbus()) airbusLaw(dt, alphaFor, cg, cphiL, M);
-      else conventionalLaw(dt, alphaFor, q, aStall);
+      else conventionalLaw(dt, alphaFor, q, aStall, gL, at.rho);
       s.V += ((T * Math.cos(s.alpha * DEG) - D) / m - G0 * Math.sin(s.gamma)) * dt;
       s.gamma += (((L + Ty) * cphi) / (m * Vs) - (G0 * cg) / Vs) * dt;
       s.gamma = clamp(s.gamma, -80 * DEG, 80 * DEG);
@@ -856,7 +890,7 @@
       if (airbus() && isAirbus() && !s.afloor && s.alpha > s.aProt - 0.3 && agl() > 100) { s.afloor = true; say('A.FLOOR — TOGA', 'amber', 4000); }
     } else {
       s.gamma = 0;
-      s.gref = null; s.aCmd = null; s.aTrim = null; s.gPrev = null; s.vLaw = null; s.stalled = false; s.deep = false; s.p = 0;
+      s.gref = null; s.aCmd = null; s.aTrim = null; s.gPrev = null; s.vLaw = null; s.stalled = false; s.deep = false; s.p = 0; s.wingSt = [false, false];
       s.phi *= Math.exp(-dt / 0.3);
       // rotation: the elevator lifts the nose once there is speed; let go, the nose wheel comes back down
       const vRot = sp.vr * KT;
@@ -915,28 +949,39 @@
   // returns to its trimmed speed by itself, in the slow, lightly damped up-and-down swing (the phugoid) every
   // aircraft has; more thrust makes it climb, less makes it sink.
   // No g limit (the 777 and the classics have none either): past 1.5 × the limit load the wings fail (physics()).
-  // Stalling: past the critical angle of attack the lift breaks away, the nose drops by itself (fully back it only
-  // just stays stalled, sinking fast), a wing drops (hard on the classics) and the ailerons hardly answer; it stays
-  // stalled until the angle is 2° back below the stall. Trimmed into the stall, it stays there hands off.
+  // The elevator and the trim set the angle of attack where the pitching moment is nil (aCmd); the nose itself
+  // (s.qB, its pitch rate) is turned towards it by the tail, and the angle of attack is the angle between the nose
+  // and the path. Nothing is scripted in the stall: past the critical angle the lift breaks away (physics()), the
+  // lift left can't carry the weight and the path bends down while the nose stays where the elevator holds it, so the
+  // angle grows on: held back, it falls out of the sky stalled, sinking thousands of feet a minute, nose near the
+  // horizon. The stalled wing's lift acts further aft and the tail loses its downwash (a nose-down moment), the
+  // wing that stalls first drops (physics(): each wing stalls on its own) and the ailerons hardly answer. Let the
+  // stick go or push and the tail brings the angle back down: once 2° under the critical angle the flow comes back.
+  // Holding the stick back trims the force away only up to the stick shaker (a pilot doesn't trim into a stall);
+  // trimmed into it with the switches, it stays there hands off.
   // A T-tail (Global 7500) past the stall can sink into a deep stall: the wing's wake blankets the tail, the elevator
-  // hardly answers and the nose doesn't drop by itself; only the stick held full forward gets it out, slowly.
+  // hardly answers and the wing and fuselage pitch it up; only the stick held full forward gets it out, slowly.
   // Delta (Concorde): no break, the drag grows until it sinks (physics()); its high-incidence protection
   // (limiter) holds it under 20°. 777 soft protections (limiter): it won't trim past the stick shaker, and lets the
   // nose down by itself there unless the stick is held back; it won't trim faster than VMO.
-  function conventionalLaw(dt, alphaFor, q, aStall) {
+  function conventionalLaw(dt, alphaFor, q, aStall, gL, rho) {
     const sp = s.spec;
-    // (started in the air: trimmed for 1 g along the path it has; just lifted off: where the rotation left it)
-    if (s.aCmd == null) s.aCmd = s.trimStart ? (s.alpha = clamp(alphaFor(Math.cos(s.gamma)), -4, aStall - 2)) : s.alpha;
+    // (started in the air: trimmed for 1 g along the path it has; just lifted off: where the rotation left it, the
+    // nose still turning as it was; from the fly-by-wire law: at the rate it was turning)
+    if (s.aCmd == null) {
+      s.aCmd = s.trimStart ? (s.alpha = clamp(alphaFor(Math.cos(s.gamma)), -4, aStall - 2)) : s.alpha;
+      s.qB = s.trimStart ? gL : s.qCmd;
+    }
     if (s.aTrim == null) s.aTrim = s.aCmd;
     s.trimStart = false;
-    const auth = clamp(q / (0.5 * 1.225 * (sp.vr * KT * 1.3) ** 2), 0.3, 1.4) * (s.deep ? 0.2 : 1);
+    const auth = clamp(q / (0.5 * 1.225 * (sp.vr * KT * 1.3) ** 2), 0.3, 1.4);
     // a jammed or lost elevator doesn't answer the stick at all (elevPitch: what's left to pitch it with)
     const stick = s.dmg.elev ? 0 : s.stick;
     // the elevator starts and stops the nose at the aircraft's own pace (its inertia)
     s.qCmd += (stick * sp.pitchRate * auth - s.qCmd) * (1 - Math.exp(-dt / (sp.inertia * 0.6)));
     s.aCmd += s.qCmd * dt;
     const held = Math.abs(stick) > 0.05;
-    if (held) s.aTrim += (s.aCmd - s.aTrim) * (1 - Math.exp(-dt / 2)); // (trimming the force away)
+    if (held) s.aTrim += (Math.min(s.aCmd, s.aProt - 1) - s.aTrim) * (1 - Math.exp(-dt / 2)); // (trimming the force away, not past the shaker)
     else s.aCmd += (s.aTrim - s.aCmd) * (1 - Math.exp(-dt / 1.2)); // (the stick springs back to the trim)
     // the trim switches (Home / End, U / J): the trim itself, 1° of angle of attack a second; the nose follows
     const trimIn = s.dmg.elev === 2 ? 0 : (held_('End', 'j') ? 1 : 0) - (held_('Home', 'u') ? 1 : 0);
@@ -947,29 +992,42 @@
       s.aTrim = Math.min(s.aTrim, s.aProt - 0.5, alphaFor(1) + 4);
       if (ias() > VMO) s.aTrim += Math.min(1, (ias() - VMO) * 0.1) * dt; // (overspeed: it pitches up to slow down)
     }
-    let aMax = aStall + 25;
+    // (the elevator's full throw: the angle of attack it can hold the wing at, well past the stall)
+    let aMax = sp.delta ? 32 : aStall + 15;
     if (prot && sp.hiAlpha) aMax = sp.hiAlpha;
     const aMin = Math.max(-12, alphaFor(-2.5));
     if (s.aCmd > aMax || s.aCmd < aMin) s.qCmd = 0;
     s.aCmd = clamp(s.aCmd, aMin, aMax);
     s.aTrim = clamp(s.aTrim, aMin, aMax);
-    const stalled = sp.delta ? s.alpha > aStall : s.stalled ? s.alpha > aStall - 2 : s.alpha > aStall;
-    if (stalled && !s.stalled) { s.drop = (Math.random() < 0.5 ? -1 : 1) * (sp.law === 'classic' ? 14 : 6); speak('stall'); }
-    s.stalled = stalled;
-    // deep stall: well past the stall on a T-tail it locks in about 22° past it (35-40°), nose near level, sinking fast
-    if (sp.deepStall && stalled && s.alpha > aStall + 5) s.deep = true;
-    if (s.deep && s.alpha < aStall) s.deep = false;
-    if (s.deep) s.aCmd += clamp(aStall + 22 - s.aCmd, -0.4, 0.4) * dt;
-    else if (stalled) s.aCmd -= (4 + 4 * (1 - clamp(s.stick, 0, 1))) * dt;
-    // The tail and the wing's response to speed changes damp the phugoid as on a real aircraft (a jet's swing loses about
-    // a quarter of its size each cycle, a propeller aircraft's more): a little less angle of attack while the path
-    // rises, a little more while it speeds up.
+    // A T-tail past the stall (deepStall: the Global 7500): the wing's wake blankets the tail, so the elevator and the
+    // tail's restoring moment fade (tail: 1 in clear air) while the wing and the fuselage go on pitching it up; deep
+    // in the wake the two balance about 22° past the stall: locked in, nose near level, sinking fast. What the
+    // elevator has left, held full forward, gets the nose down out of it; far higher the tail comes out below the wake.
+    let tail = 1;
+    if (sp.deepStall) {
+      const sm = (x) => x * x * (3 - 2 * x);
+      tail = 1 - 0.7 * sm(clamp((s.alpha - aStall - 3) / 7, 0, 1)) * (1 - sm(clamp((s.alpha - aStall - 30) / 10, 0, 1)));
+    }
+    s.deep = tail < 0.5;
+    // The wing's response to speed changes damps the phugoid as on a real aircraft (a jet's swing loses about a
+    // quarter of its size each cycle, a propeller aircraft's more): a little more angle of attack while it speeds up.
     const gdot = s.gPrev == null ? 0 : (s.gamma - s.gPrev) / DEG / Math.max(1e-3, dt);
     const vdot = s.vLaw == null ? 0 : (s.V - s.vLaw) / Math.max(1e-3, dt);
     s.gPrev = s.gamma; s.vLaw = s.V;
     // (the elevator gone, the tailplane alone damps the swing: less)
     const damp = s.dmg.elev === 2 ? 0.45 : 0.8;
-    s.alpha += (s.aCmd - damp * clamp(gdot, -3, 3) + 0.1 * clamp(vdot, -5, 5) - s.alpha) * (1 - Math.exp(-dt / sp.aTau));
+    // The nose: the tail turns it towards the angle of attack the elevator is set for, the stiffer and quicker the
+    // more air there is over it (equivalent airspeed), damped by the tail sweeping through the air as it turns (the
+    // short period: a third to half a second on most types, slower when slow). Stalled, the lift that is left acts
+    // further aft and the tail loses its downwash: a nose-down moment (brk, in degrees of angle of attack). The
+    // angle of attack then moves with the nose less the path: where the path bends away from the nose, it grows.
+    const eas = Math.max(0, s.V) * Math.sqrt(rho / 1.225);
+    const w = (1.25 / sp.aTau) * clamp(eas / (sp.vr * KT), 0.35, 1.8); // (rad/s; as the type's own pace at about its approach speed)
+    const brk = sp.delta ? 0 : sp.law === 'classic' ? 2 : 3;
+    const aEq = s.aCmd - damp * (1 - s.stallAmt) * clamp(gdot, -3, 3) + 0.1 * clamp(vdot, -5, 5) - brk * s.stallAmt;
+    const mom = tail * (aEq - s.alpha) + (1 - tail) * (aStall + 22 - s.alpha);
+    s.qB += (w * w * mom - 2 * 0.65 * w * (s.qB - gL)) * dt;
+    s.alpha = clamp(s.alpha + (s.qB - gL) * dt, -25, 70);
   }
 
   // Airbus normal law. The stick moves the flight path the aircraft is asked to fly (gref), up to 3°/s at full; the
@@ -1002,14 +1060,15 @@
   // Classics: the dihedral levels the wings by themselves. Each type rolls at its own rate (°/s at full).
   function rollLaw(dt) {
     const sp = s.spec;
-    let rate = sp.roll * (airbus() ? 1 : clamp(s.V / (sp.vr * KT * 1.2), 0.4, 1.2));
-    if (s.stalled) rate *= 0.35; // (stalled: the ailerons hardly answer)
+    // (stalled, the ailerons hardly answer: the lift they add or take away on a stalled wing is small, or even the
+    // wrong way; physics() works that out with each wing's own lift, in s.wingRoll)
+    const rate = sp.roll * (airbus() ? 1 : clamp(s.V / (sp.vr * KT * 1.2), 0.4, 1.2));
     // the roll rate wanted; the aircraft gets into it and out of it at its own pace (s.p, its inertia)
     let want = 0;
     if (Math.abs(s.roll) > 0.02) want = s.roll * rate * (airbus() ? 1 : s.ailAuth);
     else if (sp.dihedral && !s.stalled) want = -Math.sign(s.phi) * Math.min(sp.dihedral, Math.abs(s.phi) * 0.5);
-    // (stalled, a wing drops: a sudden roll that runs out at 25°, 45° on the classics, unless the stall goes on deeper)
-    if (s.stalled) want += s.drop * clamp(1 - (s.phi * Math.sign(s.drop)) / (s.spec.law === 'classic' ? 45 : 25), 0, 1);
+    // the two wings stalling apart (physics(): s.wingRoll): the wing that lost more lift goes down
+    want += (s.wingRoll || 0) * rate;
     want += s.rud * 2 * (s.dmg.rud ? 0 : 1);
     // a broken wing rolls it (dmgRoll, in full aileron throws): fly-by-wire holds what it asks for as long as the
     // ailerons that are left can; by hand it takes the stick held over (and more as it slows, the lift moving out)

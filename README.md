@@ -85,10 +85,17 @@ Twenty-one aircraft, each flying in its own way:
   stable: it goes back to its trimmed speed by itself, nose rising and falling in the slow, lightly damped swing
   every aircraft has (the phugoid: about a minute a cycle, a quarter smaller each time), so more thrust makes it
   climb and less makes it sink. No protections on the 737 and the 747: they stall (stick shaker first), and there's
-  no g limit: past 1.5 × the limit load (3.75 g) the wings fail; far past the dive speed it breaks up. Stalled,
-  the lift breaks away, the airframe shakes, the nose drops even with the stick held back and a wing drops (25°);
-  it stays stalled until the stick comes forward; trimmed into the stall it stays there hands off. Far past the
-  stall the wing is an air brake: it sinks steeply at a low speed. The bank holds where you leave it. The 747 has
+  no g limit: past 1.5 × the limit load (3.75 g) the wings fail; far past the dive speed it breaks up. The stall
+  is physics, not a script: past the critical angle of attack each wing's flow breaks away on its own, the airframe
+  shakes, and the lift that is left can't carry the weight. The path bends down while the nose stays where the
+  elevator holds it, so the angle of attack grows on: with the stick held back it falls out of the sky, stalled,
+  at 10,000 ft/min or more, the nose sinking through the horizon. The wing that stalls first (each airframe's wings
+  differ a little) drops: it rolls, and the rolling keeps that wing stalled and unstalls the other, so it goes on
+  rolling until both are stalled or you stop it (rudder; aileron hardly answers on a stalled wing, and pushes that
+  wing deeper into the stall). Holding the stick back trims the force away only up to the stick shaker, so let go
+  (or push) and the tail brings the nose and the angle of attack down: once 2° under the stall the flow comes back,
+  and the speed you gained pulls it out of the dive. Trimmed into the stall with the switches it stays there hands
+  off. Far past the stall the wing is an air brake: it sinks steeply at a low speed. The bank holds where you leave it. The 747 has
   four slow engines and a lot of mass: slow to pitch, to roll and to speed up. The 777 flies the same way (its
   fly-by-wire feels conventional) with soft protections you can pull through: it won't trim into the stall and lets
   the nose down there unless you hold the stick back, banks past 35° roll back to 30°, it pitches up past VMO.
@@ -113,9 +120,10 @@ Twenty-one aircraft, each flying in its own way:
 **Limiter** (L, or 🛡 Limiter in the cockpit's buttons): the protections off. The fly-by-wire types then fly in
 direct law (direct mode on the Global): conventional controls as above, no alpha protection, no alpha floor, no bank
 or g limit: hold the stick back with the power at idle and they stall and fall like any other, and can be
-overstressed. The Global's T-tail can then sink into a deep stall: the wing's wake blankets the tail, the elevator
-hardly answers and the nose doesn't drop by itself; it comes down at 10,000 ft/min or more, and only the stick held
-full forward (with power) gets it out, slowly. The 777 and Concorde lose their protections; the 737, 747,
+overstressed. The Global's T-tail can then sink into a deep stall: past about 8° beyond the stall the wing's wake
+blankets the tail, the elevator hardly answers and the wing and fuselage pitch it further up, so it locks in about
+20° past the stall, nose near level; it comes down at 10,000 ft/min or more, and only the stick held full forward
+(with power) gets it out, slowly. The 777 and Concorde lose their protections; the 737, 747,
 turboprops and classics have none to lose. The choice is kept for the next flight.
 
 The dialog says how each one flies and marks the runways too short for it. Thrust detents, flaps, speed limits,
