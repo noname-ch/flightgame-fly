@@ -39,7 +39,7 @@
     if (/^A3/.test(type)) return 'a320';
     if (/^B737/.test(type)) return 'b737';
     if (/^B747/.test(type) || sp.engine === 'sst') return 'b747';
-    if (/^B777/.test(type)) return 'b777';
+    if (/^B77|^B78/.test(type)) return 'b777'; // (the 787's inside: the 777's recordings, the nearest we have)
     if (sp.engine === 'prop') return 'dash8';
     if (sp.engine === 'piston') return 'radial';
     return 'a320';

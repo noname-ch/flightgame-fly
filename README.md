@@ -29,7 +29,7 @@ To send the game's ✈ Fly button to a local copy, run this once in the game's p
 
 It opens by itself, and again when you leave a flight. Pick:
 
-- **Aircraft** from a gallery of all eighteen, pictured in the livery you chose. Filter by Airbus, Boeing, Propellers,
+- **Aircraft** from a gallery of all twenty-one, pictured in the livery you chose. Filter by Airbus, Boeing, Propellers,
   or Concorde & business, or search. Each card says how many engines it has, whether it is fly-by-wire, whether the
   autopilot works in it, and whether it has a 3D cockpit (the A350s).
 - **Airport**: type a code, city or name (suggestions as you type), or click one on the small map. Its runways are
@@ -54,14 +54,14 @@ The last choices are kept for next time (localStorage `flightgame.fly.pick`). Th
 
 ## Flying by hand
 
-Eighteen aircraft, each flying in its own way:
+Twenty-one aircraft, each flying in its own way:
 - **A350-900, A350-1000, A320, A330-200, A330-300, A330-900neo, A340-300, A340-600, A380-800, Global 7500**: fly-by-wire with full
   protections (below; the Global's is Bombardier's "normal mode"). The A320 is light and nimble, the A350-1000
   heavy, with a tail that strikes at under 10°. The short A330-200 climbs better than the -300 and clears its tail
   to 12°; the A330-900neo's longer wing lands slower. The A340-300's four small CFM56s spool up slowly and climb the
   slowest of all; the 75 m A340-600 strikes its tail past 9°; the 560 t A380 rolls slowly and only its inner engines
   reverse. The Global 7500 is a light business jet with plenty of thrust: quick to roll, Mach 0.90.
-- **Boeing 737-800, 747-400, 777-300ER**: conventional controls, as a real aircraft. The stick moves the elevator;
+- **Boeing 737-800, 747-400, 777-300ER, 787-8, 787-9, 787-10**: conventional controls, as a real aircraft. The stick moves the elevator;
   let go and it springs back to where the aircraft is trimmed. Hold it and the trim follows within a couple of
   seconds (you trim the force away), or trim yourself with Home / End (U / J). Trimmed, the aircraft is speed
   stable: it goes back to its trimmed speed by itself, nose rising and falling in the slow, lightly damped swing
@@ -74,7 +74,9 @@ Eighteen aircraft, each flying in its own way:
   four slow engines and a lot of mass: slow to pitch, to roll and to speed up. The 777 flies the same way (its
   fly-by-wire feels conventional) with soft protections you can pull through: it won't trim into the stall and lets
   the nose down there unless you hold the stick back, banks past 35° roll back to 30°, it pitches up past VMO.
-  Its tail strikes past 8.5°.
+  Its tail strikes past 8.5°. The 787 Dreamliners fly as the 777 (the same soft protections) on a long, slippery
+  carbon wing: they slow down reluctantly, so plan the descent early. The -8 is the lightest and quickest to roll;
+  the -9 strikes its tail past 10°, the 68 m -10 past 8.5°.
 - **Concorde**: no flaps: the delta wing lands at about 13-15° nose up and 160 kt, with a lot of drag. It has no
   stall break: past 20° the vortices over the wing go on lifting, less and less, while the drag grows until it sinks
   like a brick (stick shaker at 17°); its high-incidence protection keeps it under 20° (limiter). Reheat at the

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Smoke test for the fly page: serves this repo (the game comes from the flightgame/ submodule), loads index.html in
 // headless Chrome and flies: the start screen, an A350 lined up at Zurich (TOGA, the keys are the plane's, its 3D
-// cockpit, a checkpoint, Esc menu, leave), then each of the eighteen types starts and spools up; the cockpit sounds (muted). Fails on any script
+// cockpit, a checkpoint, Esc menu, leave), then each of the twenty-one types starts and spools up; the cockpit sounds (muted). Fails on any script
 // error, console.error or missing file of our own.
 //
 //   node test/smoke.mjs            (needs Node 22+ and Chrome or Chromium; CHROME=/path overrides)
@@ -321,7 +321,7 @@ try {
       if (!dive.gone || !dive.blasts.includes('pool') || dive.pieces.length < 2) errors.push(`crashes: a fast dive into the ground did not go up in a fireball: ${JSON.stringify(dive)}`);
       await evaluate(() => { FG.pilot.stop(); const el = document.getElementById('pilot-start'); if (el && el.querySelector('[data-ps=no]')) el.querySelector('[data-ps=no]').click(); });
       // every other type: starts on the runway with its own engines and spools up at take-off thrust
-      step('fly it yourself: each of the eighteen aircraft starts, is drawn and spools up');
+      step('fly it yourself: each of the twenty-one aircraft starts, is drawn and spools up');
       const types = await evaluate(() => Object.keys(FG.pilot.types));
       if (types.length < 18) errors.push(`fly it yourself: only ${types.length} aircraft`);
       for (const type of types) {

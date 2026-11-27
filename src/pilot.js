@@ -1,4 +1,4 @@
-// Fly it yourself: an aircraft flown by hand in the 3D view (P, or ✈ Fly among the 3D view's buttons). Sixteen types
+// Fly it yourself: an aircraft flown by hand in the 3D view (P, or ✈ Fly among the 3D view's buttons). Twenty-one types
 // (TYPES), each flying in its own way: Airbus fly-by-wire, conventional (Boeing, Bombardier, Concorde, turboprops) or classic
 // (DC-3, Ju 52); jets, Concorde's reheat, turboprops and pistons; their own flaps, weights and limits.
 // The A350's physics are a point-mass model with Airbus-like fly-by-wire (normal law): the stick asks for a pitch rate and
@@ -54,6 +54,24 @@
     clBase: 0.22, clA: 0.085, cd0: 0.017, k: 0.0394, mdd: 0.84, roll: 15,
     crashFpm: 1100, tipBank: 11, tyreKt: 230, gauge: 'N1 %', lawName: 'NORMAL LAW',
     detents: ['IDLE', 'CL', 'FLX/MCT', 'TOGA'],
+  };
+  // Boeing 787: fly-by-wire flown as a conventional aircraft (as the 777: trim to a speed, soft protections), the
+  // GEnx / Trent 1000 spool quicker than the 777's GE90s; a long thin carbon wing (low induced drag), M 0.85, VMO 350.
+  const B787 = {
+    maker: 'Boeing', law: 'conventional', engine: 'jet', engines: 2, idle: 21, spool: 0.85, rev: 0.4, athr: true,
+    speedBrake: true, groundSpoilers: true, gear: 'retract',
+    vmo: 350, mmo: 0.90, vle: 270, clbKt: 310, crzM: 0.85, finalNm: 10, finalConf: 6,
+    clBase: 0.23, clA: 0.09, cd0: 0.0172, k: 0.037, mdd: 0.87, pitchRate: 3, roll: 10, aTau: 0.5, shaker: true, softProt: true,
+    crashFpm: 1000, tipBank: 10, tyreKt: 225, gauge: 'N1 %', lawName: 'NORMAL', detents: ['IDLE', 'CLB', 'CON', 'TO/GA'],
+    conf: [
+      { name: 'UP', flap: 0, cl0: 0, clmax: 1.32, cd: 0, vfe: 999 },
+      { name: '1', flap: 1, cl0: 0.10, clmax: 1.66, cd: 0.005, vfe: 250 },
+      { name: '5', flap: 5, cl0: 0.26, clmax: 1.90, cd: 0.011, vfe: 230 },
+      { name: '15', flap: 15, cl0: 0.42, clmax: 2.12, cd: 0.022, vfe: 200 },
+      { name: '20', flap: 20, cl0: 0.52, clmax: 2.27, cd: 0.030, vfe: 190 },
+      { name: '25', flap: 25, cl0: 0.64, clmax: 2.44, cd: 0.044, vfe: 180 },
+      { name: '30', flap: 30, cl0: 0.74, clmax: 2.60, cd: 0.056, vfe: 170 },
+    ], toConf: 3,
   };
   const TYPES = {
     'A350-900': { ...A350, name: 'Airbus A350-900', toMass: 250000, landMass: 200000, S: 442, thrust: 374000, wheelbase: 28.7, tail: 11.5,
@@ -140,6 +158,15 @@
         { name: '30', flap: 30, cl0: 0.74, clmax: 2.58, cd: 0.056, vfe: 170 },
       ], toConf: 3,
       blurb: 'The biggest twin: two GE90s. Boeing fly-by-wire that flies like a conventional aircraft: it returns to its trimmed speed; soft protections you can pull through (it won\'t trim into a stall, steep banks roll back to 30°). Tail strike past 8.5°.' },
+    'B787-8': { ...B787, name: 'Boeing 787-8 Dreamliner', toMass: 227900, landMass: 172000, S: 377, thrust: 285000, wheelbase: 22.8, tail: 11,
+      vr: 150, finalKt: 140,
+      blurb: 'The first Dreamliner: Boeing fly-by-wire on a carbon wing that bends far up in flight. Flies like the 777 (trimmed speed, soft protections you can pull through), but lighter and quicker to roll.' },
+    'B787-9': { ...B787, name: 'Boeing 787-9 Dreamliner', toMass: 254000, landMass: 192700, S: 377, thrust: 316000, wheelbase: 25.8, tail: 10,
+      vr: 155, finalKt: 145,
+      blurb: 'The long-range Dreamliner, 6 m longer than the -8: more thrust and fuel, the tail strikes past 10° on the rotation.' },
+    'B787-10': { ...B787, name: 'Boeing 787-10 Dreamliner', toMass: 254000, landMass: 201800, S: 377, thrust: 338000, wheelbase: 30.0, tail: 8.5,
+      vr: 160, finalKt: 150, roll: 9,
+      blurb: 'The longest 787, 68 m on the same wing: lands fast and heavy, and its tail strikes past 8.5°. Rotate gently.' },
     'GLOBAL7500': { name: 'Bombardier Global 7500', maker: 'Bombardier', law: 'airbus', engine: 'jet', engines: 2, idle: 22, spool: 1.25, rev: 0.35, athr: true, deepStall: true,
       speedBrake: true, groundSpoilers: true, gear: 'retract', toMass: 52000, landMass: 40000, S: 102, thrust: 84000, wheelbase: 15.5, tail: 12,
       vmo: 340, mmo: 0.925, vle: 250, clbKt: 300, crzM: 0.90, vr: 130, finalKt: 125, finalNm: 8, finalConf: 3,
@@ -297,7 +324,8 @@
       const at = atmo(s.h);
       kt = s.h / FT < 10000 ? Math.min(250, sp.clbKt) : Math.min(sp.clbKt, (sp.crzM * at.a * Math.sqrt(at.rho / 1.225)) / KT);
     } else if (s.conf >= lastConf() || (s.conf === lastConf() - 1 && s.gearDown)) kt = vls(s.conf) + 5;
-    else kt = vls(s.conf) + 25;
+    // (between notches: VLS + 25, but under the next notch's VFE so it can be selected; heavy jets would hang there)
+    else kt = Math.max(vls(s.conf) + 5, Math.min(vls(s.conf) + 25, CONF[s.conf + 1].vfe - 5));
     return { kt: Math.round(Math.min(kt, top)), sel: false };
   }
   // the autothrust works with the levers in CL (or between idle and CL: then that is the most it gives), in the air
