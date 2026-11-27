@@ -1057,7 +1057,7 @@
   const PART_TIP = 0.8, PART_WING = 0.5;
   const CL_AIL = 0.045; // rolling moment (per q·S·span) of the ailerons at full throw
   // leak: seconds of fuel left burning out of each wing (left, right) where a tank tore open; fireT: how long it has burned
-  function noDamage() { return { cut: [0, 0], elev: 0, elevOff: 0, rud: 0, engOut: [], thrPrev: null, body: [0, 0], pod: [], leak: [0, 0], fireT: [0, 0] }; }
+  function noDamage() { return { cut: [0, 0], elev: 0, elevOff: 0, rud: 0, engOut: [], thrPrev: null, body: [0, 0, 0, 0], pod: [], leak: [0, 0], fireT: [0, 0] }; }
   // the share of a half wing's lift beyond a break at `cut` half spans (an elliptical spread of lift), and how far out
   // (in half spans) it acted on average
   function lostLift(cut) {
@@ -1506,10 +1506,16 @@
     }
     if (gone || fails(3.5, 1.5)) breakOff('elev', 0, null, true, fling(1.2, 1.5));
     if (gone || fails(3.8, 1.5)) breakOff('rud', 0, null, true, fling(1.2, 1.5));
-    // the fuselage: behind the wing, then ahead of it
+    // the fuselage: behind the wing, then ahead of it; harder, also ahead of the tailplanes (the tail cone) and behind
+    // the cockpit (sooner nose down): up to five sections (d.body: nose, tail, cockpit, tail cone; js/livery.js bodyBreaks)
     const tail = gone || fails(1, 0.7), nose = gone || fails(1.7, 0.9);
-    if (tail) { addPiece({ kind: 'body', side: -1, flags: (d.elev === 2 ? 1 : 0) + (d.rud ? 2 : 0) }, 40, true, fling(0.9)()); d.body[1] = 1; }
-    if (nose) { if (!(gone && S > 12)) addPiece({ kind: 'body', side: 1 }, 45, true, fling(0.8)()); d.body[0] = 1; } // (the nose takes the impact first)
+    const cone = gone || fails(2.2, 1.2), cockpit = gone || fails(2.6 - 0.8 * clamp((-pitch - 3) / 10, 0, 1), 1.2);
+    const tailFlags = (d.elev === 2 ? 1 : 0) + (d.rud ? 2 : 0);
+    if (tail) { addPiece({ kind: 'body', side: -1, flags: cone ? 4 : tailFlags }, 40, true, fling(0.9)()); d.body[1] = 1; }
+    if (cone) { addPiece({ kind: 'body', side: -2, flags: tailFlags }, 25, true, fling(1, 1.3)()); d.body[3] = 1; }
+    const whole = !(gone && S > 12); // (the nose takes the impact first)
+    if (nose) { if (whole) addPiece({ kind: 'body', side: 1, flags: cockpit ? 4 : 0 }, 45, true, fling(0.8)()); d.body[0] = 1; }
+    if (cockpit) { if (whole) addPiece({ kind: 'body', side: 2 }, 20, true, fling(0.7, 1.3)()); d.body[2] = 1; }
     if (gone) s.gone = true;
     // the wreck: the middle with the wings, skidding on with what the impact left it (s.wreck, wreckStep)
     if (!gone) {
@@ -1536,7 +1542,9 @@
     let tail2 = '';
     if (gone) tail2 = S > 12 ? ': it disintegrated in a fireball' : ': it broke up in a fireball';
     else {
-      const said = [tail && nose ? 'the fuselage broke in three' : tail ? 'the fuselage broke behind the wing' : nose ? 'the fuselage broke ahead of the wing' : null,
+      const cracks = [tail, nose, cone, cockpit].filter(Boolean).length;
+      const said = [cracks > 1 ? `the fuselage broke in ${['', '', 'three', 'four', 'five'][cracks]}` : tail ? 'the fuselage broke behind the wing'
+        : nose ? 'the fuselage broke ahead of the wing' : cone ? 'the tail broke off' : cockpit ? 'the cockpit broke off' : null,
         broke.length ? `${broke.length > 1 ? broke.slice(0, -1).join(', ') + ' and ' + broke[broke.length - 1] : broke[0]} torn off` : null].filter(Boolean);
       if (said.length) tail2 = ': ' + said.join('; ');
     }
