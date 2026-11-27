@@ -269,7 +269,7 @@ try {
   if (ewdLit < 200) errors.push(`the E/WD's memo stayed blank (${ewdLit} lit pixels)`);
   await shot('a320-ahead');
 
-  step('real clicks: the overhead\'s STROBE and BEACON, the FCU\'s FD and ALT knob, the pedestal\'s ENG 2 master');
+  step('real clicks: the overhead\'s STROBE and BEACON, the FCU\'s FD and ALT knob, the EFIS\'s ND RANGE, MODE and VOR/ADF switch (pressed), the pedestal\'s ENG 2 master');
   await look(55, 62);
   await shot('a320-overhead');
   // (the strobe switch: a right click moves it down a position, ON to AUTO; the beacon: a click toggles it)
@@ -299,6 +299,19 @@ try {
   await frame();
   const alt1 = await evaluate(() => FG.fmgc.F.fcu.alt);
   if (alt1 === alt0) errors.push(`the ALT knob did not turn (${alt0} → ${alt1})`);
+  // (the EFIS: the ND's RANGE and MODE knobs by the wheel, a click on the VOR/ADF switch 1)
+  const nd0 = await evaluate(() => ({ ...FG.fmgc.F.nd }));
+  await evaluate(() => { const dk = FG.cockpit3d.pit.fg.deck, k = (l) => dk.def.picks.findIndex((p) => p.label === l); dk.press([k('ND range')], 3); dk.press([k('ND mode')], 3); });
+  await frame();
+  const nd1 = await evaluate(() => ({ ...FG.fmgc.F.nd }));
+  if (nd1.range !== nd0.range * 2) errors.push(`the ND RANGE knob did not turn the range up (${nd0.range} → ${nd1.range})`);
+  if (nd0.mode !== 'ARC' || nd1.mode !== 'PLAN') errors.push(`the ND MODE knob did not turn ARC to PLAN (${nd0.mode} → ${nd1.mode})`);
+  await evaluate(() => { const dk = FG.cockpit3d.pit.fg.deck, k = (l) => dk.def.picks.findIndex((p) => p.label === l); dk.press([k('ND range')], 4); dk.press([k('ND mode')], 4); dk.press([k('Toggle VOR1 / ADF1')], 0); });
+  await frame();
+  const nd2 = await evaluate(() => ({ ...FG.fmgc.F.nd, needle: [...FG.fmgc.F.nd.needle] }));
+  if (nd2.needle[0] !== 'VOR') errors.push(`a click on the VOR/ADF switch 1 did not show the VOR needle (${nd2.needle[0]})`);
+  if (nd2.mode !== 'ARC' || nd2.range !== nd0.range) errors.push(`the ND knobs did not turn back (${nd2.mode} ${nd2.range})`);
+  await evaluate(() => { FG.fmgc.F.nd.needle[0] = 'OFF'; });
   await look(25, -40);
   await shot('a320-pedestal');
   // (the engine master: a right click turns it OFF)

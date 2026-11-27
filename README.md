@@ -309,7 +309,8 @@ switch (off: no nose wheel steering and no anti-skid; braking hard at speed burs
 
 **The EFIS panels:** FD and LS; one of CSTR (the flight plan's altitudes), WPT (the towns the MCDU knows), VOR.D,
 NDB (the beacons) or ARPT on the ND; the ADF / VOR needles 1 and 2 (VORs tuned by themselves, or on RAD NAV);
-MODE and RANGE.
+MODE and RANGE. On FlightGear's A320-family deck (the A320s, A330s and A340s) its own EFIS knobs and VOR/ADF switches
+do the same.
 
 **The MCDU** also has DATA (position and IRS monitors, A/C status, look up a waypoint or navaid), FUEL PRED (fuel at
 the destination, extra), SEC F-PLN (copy, activate, delete), ATC COMM (an airport's ATIS by datalink), MCDU MENU

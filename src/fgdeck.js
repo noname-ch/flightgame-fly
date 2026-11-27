@@ -160,7 +160,7 @@ function mul(a, b) { // a × b, column-major
 // The properties whose clicks go to the aircraft's systems (an event 'prop').
 const SYS_PROPS = ['controls/switches/', 'controls/lighting/', 'controls/electrical/', 'controls/hydraulic/', 'controls/fuel/', 'controls/pneumatics/',
   'controls/ice-protection/', 'controls/navigation/', 'controls/oxygen/', 'controls/engines/engine', 'controls/apu/', 'controls/ignition/',
-  'controls/atc/', 'controls/cockpit/', 'instrumentation/mk-viii/inputs/discretes/'];
+  'controls/atc/', 'controls/cockpit/', 'instrumentation/mk-viii/inputs/discretes/', 'instrumentation/efis'];
 export const norm = (p) => String(p).trim().replace(/^\/+/, '').replace(/\[0\]/g, '');
 
 // ---------- a deck being played ----------
@@ -315,7 +315,14 @@ export class Deck {
       case 'fcu.FCUController.LOC': this.events.push({ e: 'press', btn: 'LOC' }); break;
       case 'fcu.FCUController.APPR': this.events.push({ e: 'press', btn: 'APPR' }); break;
       case 'fcu.setNDRange': this.events.push({ e: 'press', btn: n(1) > 0 ? 'RNG+' : 'RNG-' }); break;
-      case 'fcu.setCptND': case 'fcu.setFoND': this.events.push({ e: 'press', btn: 'NDMODE' }); break;
+      // (the ND's MODE knob: FlightGear's numbers 0 ROSE ILS, 1 ROSE VOR, 2 ROSE NAV, 3 ARC, 4 PLAN, one a click)
+      case 'fcu.setCptND': case 'fcu.setFoND': {
+        const p = name.endsWith('CptND') ? 'instrumentation/efis/mfd/pnl_mode-num' : 'instrumentation/efis[1]/mfd/pnl_mode-num';
+        const was = this.get(p), x = Math.max(0, Math.min(4, was + Math.sign(n(0))));
+        this.set(p, x);
+        if (x !== was) this.events.push({ e: 'prop', name: p, x, was });
+        break;
+      }
       case 'systems.doRevThrust': this.events.push({ e: 'reverse', on: true }); break;
       case 'systems.unRevThrust': this.events.push({ e: 'reverse', on: false }); break;
       case 'core.deploySpeedbrake': this.events.push({ e: 'speedbrake', x: Math.min(1, this.get('controls/flight/speedbrake') + 0.5) }); break;

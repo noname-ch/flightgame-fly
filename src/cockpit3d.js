@@ -790,6 +790,19 @@ function fgProp(name, x, was) {
     }
   }
 }
+// The EFIS panels: the ND's MODE (FlightGear's numbers: 0 ROSE ILS, 1 ROSE VOR, 2 ROSE NAV, 3 ARC, 4 PLAN; the ND draws
+// every ROSE as ROSE NAV) and the VOR/ADF switches (1 VOR, -1 ADF; the left one needle 1, the right one needle 2).
+const ndModeOf = (x) => (Math.round(x) === 3 ? 'ARC' : Math.round(x) === 4 ? 'PLAN' : 'ROSE');
+function efisProp(name, x, M) {
+  const F = M && M.F;
+  if (!F || !F.nd) return;
+  if (name.endsWith('/mfd/pnl_mode-num')) F.nd.mode = ndModeOf(x);
+  else if (name.endsWith('/inputs/range-nm')) F.nd.range = Math.max(10, Math.min(320, x));
+  else if (name.endsWith('-vor-adf')) {
+    if (!F.nd.needle) F.nd.needle = ['OFF', 'OFF'];
+    F.nd.needle[name.endsWith('rh-vor-adf') ? 1 : 0] = x > 0.5 ? 'VOR' : x < -0.5 ? 'ADF' : 'OFF';
+  }
+}
 // (the A320 deck's two engine controls on a four-engined aircraft: the left one works engines 1 and 2, the right 3 and 4)
 const engsOf = (side, n) => (n === 4 ? (side ? [2, 3] : [0, 1]) : [side ? n - 1 : 0]);
 // the deck's clicks carried out, then its switches, levers and lights set as the aircraft has them
@@ -828,7 +841,11 @@ function fgSync(dt) {
       case 'speedbrake': if (s.spec.speedBrake) s.sb = Math.max(0, Math.min(1, e.x)); break;
       case 'armed': if (s.spec.groundSpoilers) s.armed = e.on; break;
       case 'parking': s.parking = e.on; P.api.say(e.on ? 'Parking brake set' : 'Parking brake released', 'info', 1500); break;
-      case 'prop': if (e.name === 'ecp') { if (y) y.set('ecp', e.key); } else fgProp(e.name, e.x, e.was); break;
+      case 'prop':
+        if (e.name === 'ecp') { if (y) y.set('ecp', e.key); }
+        else if (e.name.startsWith('instrumentation/efis')) efisProp(e.name, e.x, M);
+        else fgProp(e.name, e.x, e.was);
+        break;
       default:
     }
   }
@@ -939,7 +956,16 @@ function fgSync(dt) {
     d.set('it-autoflight/output/fd1', M.F.fd ? 1 : 0); d.set('it-autoflight/output/fd2', M.F.fd ? 1 : 0);
     d.set('it-autoflight/output/loc-arm', M.F.locBtn || M.F.appr ? 1 : 0); d.set('it-autoflight/output/gs-arm', M.F.appr ? 1 : 0);
     d.set('controls/autobrake/mode', { LO: 1, MED: 2, MAX: 3 }[M.F.abrk] || 0);
-    if (M.F.nd) { d.set('instrumentation/efis/inputs/range-nm', M.F.nd.range); d.set('instrumentation/efis[1]/inputs/range-nm', M.F.nd.range); }
+    // (the EFIS panels' knobs and switches where the ND has them; MODE left on ROSE ILS or ROSE VOR stays there)
+    if (M.F.nd) {
+      const nd = M.F.nd, sw = (k) => ({ VOR: 1, ADF: -1 }[nd.needle && nd.needle[k]] || 0);
+      for (const e of ['instrumentation/efis', 'instrumentation/efis[1]']) {
+        d.set(`${e}/inputs/range-nm`, nd.range);
+        if (ndModeOf(d.get(`${e}/mfd/pnl_mode-num`)) !== nd.mode) d.set(`${e}/mfd/pnl_mode-num`, { ARC: 3, PLAN: 4 }[nd.mode] ?? 2);
+        d.set(`${e}/input/lh-vor-adf`, sw(0));
+        d.set(`${e}/input/rh-vor-adf`, sw(1));
+      }
+    }
     // (the FCU's labels, dashes and managed dots: FlightGear's rules light them from these: SPD or MACH, HDG V/S or
     // TRK FPA, dashes where a window shows none, the dots for managed speed, NAV and the managed altitude)
     if (fcuW) {
