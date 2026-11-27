@@ -694,11 +694,21 @@
     if (on) window.addEventListener('blur', clearKeys); else window.removeEventListener('blur', clearKeys);
   }
   const clearKeys = () => s.keys.clear();
+  // The touch thrust lever (src/touch.js) sets the levers straight, 0 idle .. 1 TOGA (reverse is its own button, R).
+  function setLever(v) {
+    if (!s.active || s.crashed) return;
+    const was = s.lever;
+    s.lever = clamp(v, 0, 1);
+    if (s.lever !== was) { s.afloor = false; s.revOk = false; }
+  }
   function inputs(dt) {
     const ease = (cur, to, tau) => cur + (to - cur) * (1 - Math.exp(-dt / tau));
-    const pitch = (held('ArrowDown', 's') ? 1 : 0) - (held('ArrowUp', 'w') ? 1 : 0); // ↓ pulls the nose up (a stick)
-    const roll = (held('ArrowRight', 'd') ? 1 : 0) - (held('ArrowLeft', 'a') ? 1 : 0);
-    const rud = (held('e') ? 1 : 0) - (held('q') ? 1 : 0);
+    let pitch = (held('ArrowDown', 's') ? 1 : 0) - (held('ArrowUp', 'w') ? 1 : 0); // ↓ pulls the nose up (a stick)
+    let roll = (held('ArrowRight', 'd') ? 1 : 0) - (held('ArrowLeft', 'a') ? 1 : 0);
+    let rud = (held('e') ? 1 : 0) - (held('q') ? 1 : 0);
+    // the touch controls on a phone (src/touch.js): a stick or the phone's tilt, analogue, on top of the keys
+    const tc = FG.touch && FG.touch.on ? FG.touch.input() : null;
+    if (tc) { pitch = clamp(pitch + tc.pitch, -1, 1); roll = clamp(roll + tc.roll, -1, 1); rud = clamp(rud + tc.rud, -1, 1); }
     if (FG.fmgc) FG.fmgc.pilotInput(pitch, roll);
     s.stick = ease(s.stick, pitch, 0.35);
     s.roll = ease(s.roll, roll, 0.25);
@@ -713,7 +723,7 @@
       s.lever = clamp(s.lever + thr * rate * dt, min, 1);
       if (thr > 0 || s.lever > 0) s.revOk = false;
     } else s.revOk = s.lever <= 0 && s.onGround;
-    s.brake = ease(s.brake, held(' ', 'b', '.') || s.parking ? 1 : 0, 0.3);
+    s.brake = ease(s.brake, held(' ', 'b', '.') || s.parking || (tc && tc.brake) ? 1 : 0, 0.3);
   }
 
   // ---------- physics ----------
@@ -1897,7 +1907,29 @@
       headUp(W, H);
       ctx.restore();
     }
-    if (!deck || s.inst) {
+    const tl = FG.touch && FG.touch.on ? FG.touch.layout() : null;
+    if (tl && (!deck || s.inst)) {
+      // on a phone (src/touch.js): the PFD (and the FMA) bottom left between the thrust lever and the stick, the ND
+      // and the engine display beside it when asked for (the 'PFD' button cycles them), as large as fits
+      const ph = fm ? 324 : 270, gap = 8;
+      const parts = [['pfd', 400]];
+      if (tl.inst >= 1 && fm) parts.push(['nd', 324]);
+      if (tl.inst >= 2 || (tl.inst >= 1 && !fm)) parts.push(['ecam', 250]);
+      const wsum = parts.reduce((a, p) => a + p[1], 0) + gap * (parts.length - 1);
+      const kt = tl.inst < 0 ? 0 : Math.min(1, (W - tl.left - tl.right) / wsum, (H - tl.top - tl.bottom) * tl.share / ph);
+      let x = tl.left;
+      const y0 = H - tl.bottom;
+      for (const [what, w] of kt > 0 ? parts : []) {
+        ctx.save();
+        if (what === 'pfd') {
+          ctx.translate(x, y0 - 270 * kt); ctx.scale(kt, kt); pfd(); ctx.restore();
+          if (fm) { ctx.save(); ctx.translate(x, y0 - 324 * kt); ctx.scale(kt, kt); FG.fmgc.drawFma(ctx); }
+        } else if (what === 'nd') { ctx.translate(x, y0 - 324 * kt); ctx.scale(kt, kt); FG.fmgc.drawNd(ctx); }
+        else { ctx.translate(x, y0 - 270 * kt); ctx.scale(kt, kt); ecam(); }
+        ctx.restore();
+        x += (w + gap) * kt;
+      }
+    } else if (!deck || s.inst) {
       // PFD bottom left, engines and config bottom right; with the FMGC the FMA above the PFD and the ND beside it
       ctx.save(); ctx.translate(12, H - 12 - 270 * k); ctx.scale(k, k); pfd(); ctx.restore();
       if (fm) {
@@ -1909,7 +1941,7 @@
     // warnings, messages
     const now = performance.now();
     s.msgs = s.msgs.filter((m) => m.until > now);
-    let y = fm ? 150 : 70;
+    let y = tl ? tl.top + 22 : fm ? 150 : 70;
     const flash = Math.floor(now / 400) % 2 === 0;
     for (const [t, lvl] of warn) {
       if (lvl === 'red' && !flash && /PULL UP|SINK|TOO LOW|OVERSPEED/.test(t)) { y += 30; continue; }
@@ -1920,18 +1952,21 @@
       const t = s.touch;
       const col = t.rating === 'butter' || t.rating === 'smooth' ? '#30d158' : t.rating === 'firm' ? '#ffd60a' : '#ff453a';
       banner(W / 2, H * 0.32, `Touchdown ${t.fpm} ft/min · ${t.kt} kt · ${t.rating}${t.on ? '' : ' · not on a runway!'}`, col, 22);
-      if (s.ck) banner(W / 2, H * 0.32 + 30, 'Backspace: try it again from the checkpoint', '#e8f0ff', 14);
+      if (s.ck) banner(W / 2, H * 0.32 + 30, tl ? '⟲ try it again from the checkpoint' : 'Backspace: try it again from the checkpoint', '#e8f0ff', 14);
     }
     if (s.crashed) {
       banner(W / 2, H * 0.4, `💥 CRASH — ${s.crashed}`, '#ff3b30', 28);
-      banner(W / 2, H * 0.4 + 44, s.ck ? 'Backspace: back to the checkpoint · Enter: start again · Esc: menu' : 'Enter: try again · Esc: menu', '#fff', 16);
+      banner(W / 2, H * 0.4 + 44, tl ? (s.ck ? '⟲ back to the checkpoint · ☰ menu: start again' : '☰ menu: start again')
+        : s.ck ? 'Backspace: back to the checkpoint · Enter: start again · Esc: menu' : 'Enter: try again · Esc: menu', '#fff', 16);
     }
-    if (s.paused) banner(W / 2, H * 0.45, 'PAUSED (P)', '#fff', 26);
+    if (s.paused) banner(W / 2, H * 0.45, tl ? 'PAUSED · ▶ to go' : 'PAUSED (P)', '#fff', 26);
     if (s.help) helpBox(W, H);
   }
   function banner(x, y, text, color, size) {
     ctx.font = `600 ${size}px system-ui, sans-serif`;
-    const w = ctx.measureText(text).width + size * 1.2;
+    let w = ctx.measureText(text).width + size * 1.2;
+    const room = window.innerWidth - 16; // (a narrow phone screen: smaller letters rather than cut off)
+    if (w > room) { size = Math.max(9, size * room / w); ctx.font = `600 ${size}px system-ui, sans-serif`; w = ctx.measureText(text).width + size * 1.2; }
     ctx.fillStyle = 'rgba(0,0,0,0.6)';
     roundRect(x - w / 2, y - size * 0.95, w, size * 1.6, 6); ctx.fill();
     ctx.fillStyle = color; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
@@ -2371,6 +2406,7 @@
         <button data-pm="ck-save"${s.crashed ? ' disabled' : ''}>⚑ Save a checkpoint here <kbd>Z</kbd></button>
         <button data-pm="restart">↺ Start this flight again <kbd>R</kbd></button>
         <button data-pm="leave">✕ Leave the cockpit <kbd>Q</kbd></button>
+        ${FG.touch ? `<button data-pm="touch">📱 Touch controls: ${FG.touch.on ? 'on' : 'off'}</button>` : ''}
       </div>
       <h3 class="pm-sub">Failures (to practise)</h3>
       <div class="pm-fails">${FAILS.map(([k, label]) => `<button data-fail="${k}"${s.crashed || s.tumble ? ' disabled' : ''}>${label}</button>`).join('')}</div>
@@ -2383,6 +2419,7 @@
       else if (b && b.dataset.pm === 'leave') stop();
       else if (b && b.dataset.pm === 'ck-back') toCheckpoint();
       else if (b && b.dataset.pm === 'ck-save') { saveCheckpoint(); showMenu(false); }
+      else if (b && b.dataset.pm === 'touch') { FG.touch.set(!FG.touch.on); b.textContent = `📱 Touch controls: ${FG.touch.on ? 'on' : 'off'}`; }
       const f = e.target.closest('[data-fail]');
       if (f && !f.disabled) { fail(f.dataset.fail); showMenu(false); }
     });
@@ -2509,7 +2546,9 @@
     get LOOK_DOWN() { return lookDownOf(); },
     panel,
     types: TYPES,
-    open: openDialog, start, stop, step, pose, fail, // (fail: a failure from the menu, by its key: FAILS)
+    open: openDialog, start, stop, step, pose, fail,
+    setLever, menu: (on) => showMenu(on == null ? !s.menu : on), // (the touch controls, src/touch.js)
+    get specs() { return s.spec; }, get conf() { return s.conf; }, confs: () => CONF, detents: () => DETENTS, detentName, // (fail: a failure from the menu, by its key: FAILS)
     runwayEnds, ends: runwayEnds, bestEnd, defaultAirport, // (for the start screen, src/select.js, and test/ap-test.js)
     // for src/fmgc.js
     api: { ias, atmo, agl, vsFpm, spdTarget, ils, offset, say, speak, athrOn, airbus, vls, detentName,

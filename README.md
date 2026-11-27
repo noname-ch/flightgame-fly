@@ -52,6 +52,24 @@ It opens by itself, and again when you leave a flight. Pick:
 The last choices are kept for next time (localStorage `flightgame.fly.pick`). The link from the game
 (`?type=&from=&rw=&mode=&plane=`) presets them.
 
+## On a phone or tablet
+
+On a touch screen the flight gets touch controls by themselves (src/touch.js); turn the phone sideways.
+
+- **Thrust lever** on the left edge: drag it; it clicks into IDLE, CL, FLX/MCT and TOGA. **REV** beside it on the
+  ground (types with reversers).
+- **Stick** on the right: put a thumb down anywhere there and move it (down = nose up, as a real stick; let go and
+  it centres). Or **📱 Tilt**: steer by turning the phone like a wheel and tipping its top edge towards you (nose up)
+  or away; **⊙** makes the way you hold it now the middle.
+- **GEAR, FLAPS ▼ / ▲, SPD BRK, BRAKES** (hold) beside the lever, each showing where it is.
+- Top: **PFD** (which instruments: PFD · PFD + ND · all · none), ⏸ pause, 🎥 camera, **AP** (autopilot), ⚑ checkpoint,
+  ⟲ retry, **⋯** more (autothrust, speed ± and managed, trim, APPR, FCU, MCDU, overhead, limiter, parking brake, arm
+  spoilers, which way the stick pitches, full screen, touch controls off) and ☰ the menu.
+- One finger on the rest of the screen turns the camera round the plane (in a cockpit: the head). Outside the
+  cockpit the plane sits higher on the screen, above the instruments.
+- The menu's **📱 Touch controls** turns them on or off (kept in localStorage `flightgame.fly.touch`); a touch
+  screen on a desktop gets them at its first touch.
+
 ## Flying by hand
 
 Twenty-one aircraft, each flying in its own way:

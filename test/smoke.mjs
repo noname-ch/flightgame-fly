@@ -247,7 +247,7 @@ try {
   await waitFor(() => !!document.getElementById('pilot-start'), 5000, 'the start screen again after leaving');
   await evaluate(() => { const el = document.getElementById('pilot-start'); el.querySelector('[data-wind=game]').click(); el.querySelector('[data-ps=no]').click(); });
 
-    step('fly it yourself (P): an A350 lined up at Zurich, TOGA spools the engines, the keys are the plane\'s, its 3D cockpit, a checkpoint goes back, Esc opens its menu, Q leaves');
+    step('fly it yourself (P): an A350 lined up at Zurich, TOGA spools the engines, the keys are the plane\'s, its 3D cockpit, a checkpoint goes back, the touch controls, Esc opens its menu, Q leaves');
     await evaluate(() => {
       const r = G.airportRunways('ZRH')[0];
       const course = G.bearing({ lat: r[0], lon: r[1] }, { lat: r[2], lon: r[3] });
@@ -283,6 +283,26 @@ try {
       const ck = await evaluate(() => { const s = FG.pilot.state; return { lever: s.lever, crashed: s.crashed, paused: s.paused, moved: !!s.ck && s.lat === s.ck.state.lat }; });
       if (ck.lever !== 1 || ck.crashed || !ck.paused || !ck.moved) errors.push(`fly it yourself: Backspace did not go back to the checkpoint: ${JSON.stringify(ck)}`);
       await key('p');
+      // touch controls (src/touch.js, phones): the thrust lever, a button presses the plane's key, the stick, off again
+      {
+        const tc = await evaluate(async () => {
+          FG.touch.set(true);
+          await new Promise((r) => setTimeout(r, 400));
+          const s = FG.pilot.state, ui = document.getElementById('touch-ui');
+          const out = { shown: !!ui && !ui.hidden && document.body.classList.contains('fly-touch') };
+          FG.pilot.setLever(0.86); out.lever = s.lever;
+          const c0 = s.conf; ui.querySelector('[data-tc=flapdn]').click(); out.flap = s.conf - c0;
+          ui.querySelector('[data-tc=flapup]').click();
+          Object.assign(FG.touch.stick, { id: 99, x: 0, y: 1 }); out.pitch = FG.touch.input().pitch;
+          Object.assign(FG.touch.stick, { id: null, x: 0, y: 0 });
+          FG.touch.set(false); localStorage.removeItem('flightgame.fly.touch');
+          await new Promise((r) => setTimeout(r, 300));
+          out.off = ui.hidden && !document.body.classList.contains('fly-touch');
+          FG.pilot.setLever(1);
+          return out;
+        });
+        if (!tc.shown || tc.lever !== 0.86 || tc.flap !== 1 || !(tc.pitch > 0.9) || !tc.off) errors.push(`touch controls: ${JSON.stringify(tc)}`);
+      }
       // Esc: the flight's own menu (the flight waits), Esc again resumes, Q from the menu leaves
       await key('Escape');
       const pm = await evaluate(() => ({ active: FG.pilot.active, menu: !!document.getElementById('pilot-menu'), paused: FG.pilot.state.menu, game: !document.getElementById('menu').hidden }));

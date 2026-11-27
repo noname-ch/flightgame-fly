@@ -212,3 +212,97 @@ body.piloting .view3d-controls { display: none; }
 @media (max-width: 640px) { .fs-body { grid-template-columns: 1fr; } .fs-gallery { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); } }
 
 .fcu-btn.fcu-opt { min-width: 0; padding-left: 4px; padding-right: 4px; font-size: 9px; }
+
+/* ---------- touch controls on a phone or tablet (src/touch.js) ---------- */
+:root { --tc-safe-left: env(safe-area-inset-left, 0px); --tc-safe-right: env(safe-area-inset-right, 0px); --tc-safe-bottom: env(safe-area-inset-bottom, 0px); --tc-safe-top: env(safe-area-inset-top, 0px); }
+body.fly-touch, body.fly-touch #touch-ui { touch-action: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; overscroll-behavior: none; }
+body.fly-touch #pilot-hud .pl-bar { display: none; }
+body.fly-touch #fcu { top: calc(52px + var(--tc-safe-top)); zoom: min(0.62, calc(100vw / 1080px)); }
+@supports not (zoom: min(1, 2)) { body.fly-touch #fcu { zoom: 0.5; } }
+body.fly-touch #mcdu { top: calc(52px + var(--tc-safe-top)); right: auto; left: 50%; transform: translateX(-50%); zoom: 0.72; }
+#touch-ui { position: fixed; inset: 0; z-index: 2050; pointer-events: none; font: 600 12px system-ui, sans-serif; color: #e8eef8; }
+#touch-ui[hidden] { display: none; }
+#touch-ui button {
+  pointer-events: auto; min-width: 40px; height: 38px; padding: 0 10px; border-radius: 10px; border: 1px solid rgba(255, 255, 255, 0.22);
+  background: rgba(8, 10, 14, 0.62); color: #e8eef8; font: 600 13px system-ui, sans-serif; -webkit-tap-highlight-color: transparent;
+  touch-action: none; backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
+}
+#touch-ui button:active, #touch-ui button.down { background: rgba(60, 120, 200, 0.55); }
+#touch-ui button.lit { border-color: #3cff6a; color: #8dffaa; box-shadow: inset 0 0 0 1px rgba(60, 255, 106, 0.35); }
+#touch-ui button:disabled { opacity: 0.35; }
+#touch-ui button[hidden] { display: none; }
+.tc-top {
+  position: absolute; top: calc(6px + var(--tc-safe-top)); left: calc(6px + var(--tc-safe-left)); right: calc(6px + var(--tc-safe-right));
+  display: flex; justify-content: space-between; gap: 6px; pointer-events: none;
+}
+.tc-group { display: flex; gap: 5px; }
+.tc-left {
+  position: absolute; left: calc(6px + var(--tc-safe-left)); top: calc(52px + var(--tc-safe-top)); bottom: calc(8px + var(--tc-safe-bottom));
+  display: flex; gap: 6px; pointer-events: none;
+}
+/* the thrust lever */
+.tc-thr { position: relative; width: 62px; pointer-events: auto; touch-action: none; border-radius: 12px; background: rgba(8, 10, 14, 0.5); border: 1px solid rgba(255, 255, 255, 0.18); }
+.tc-thr-track { position: absolute; left: 50%; top: 18px; bottom: 18px; width: 10px; margin-left: -5px; border-radius: 5px; background: rgba(255, 255, 255, 0.14); overflow: hidden; display: flex; align-items: flex-end; }
+.tc-thr-fill { width: 100%; background: linear-gradient(#3cff6a, #2a9d4a); }
+.tc-thr.rev .tc-thr-track { background: rgba(255, 70, 60, 0.45); }
+.tc-thr-marks { position: absolute; left: 0; right: 0; top: 18px; bottom: 18px; pointer-events: none; }
+.tc-thr-marks span { position: absolute; left: 3px; right: 3px; height: 10px; border-bottom: 1px solid rgba(255, 255, 255, 0.4); font-size: 8px; line-height: 9px; color: #b4c2d0; text-shadow: 0 1px 2px #000; white-space: nowrap; overflow: hidden; }
+.tc-thr-marks span i { display: none; }
+.tc-thr-handle { position: absolute; left: 4px; right: 4px; height: 30px; margin-bottom: 3px; transform: translateY(50%); border-radius: 8px;
+  background: linear-gradient(#d8dee6, #8f99a5); box-shadow: 0 2px 6px rgba(0, 0, 0, 0.6); display: flex; align-items: center; justify-content: center; pointer-events: none; }
+.tc-thr-handle b { font: 800 10px system-ui, sans-serif; color: #14181d; }
+.tc-thr.rev .tc-thr-handle { background: linear-gradient(#ffb0a8, #d8453a); }
+.tc-thr.held .tc-thr-handle { box-shadow: 0 0 0 2px #7fd4ff, 0 2px 6px rgba(0, 0, 0, 0.6); }
+.tc-thr-handle { bottom: 18px; } /* (moved by src/touch.js within the track) */
+.tc-col { display: flex; flex-direction: column; gap: 5px; justify-content: flex-end; }
+#touch-ui .tc-big { width: 74px; height: auto; flex: 0 1 46px; min-height: 34px; padding: 2px 4px; display: flex; flex-direction: column; align-items: center; justify-content: center; font-size: 11px; line-height: 1.1; }
+#touch-ui .tc-big small { font-size: 10px; color: #7fd4ff; font-weight: 700; }
+#touch-ui .tc-rev { color: #ffb0a8; }
+/* the stick */
+.tc-stick-zone { position: absolute; right: 0; bottom: 0; width: 42%; top: 30%; pointer-events: auto; touch-action: none; }
+.tc-stick-hint { position: absolute; right: calc(36px + var(--tc-safe-right)); bottom: calc(36px + var(--tc-safe-bottom)); width: 112px; height: 112px; border-radius: 50%;
+  border: 2px dashed rgba(255, 255, 255, 0.25); display: flex; align-items: center; justify-content: center; color: rgba(255, 255, 255, 0.45); font-size: 12px; }
+.tc-stick-zone.tilt .tc-stick-hint::after { content: " · tilt on"; margin-left: 3px; }
+.tc-stick-zone.held .tc-stick-hint { display: none; }
+.tc-stick-base { display: none; position: absolute; border-radius: 50%; border: 2px solid rgba(255, 255, 255, 0.45); background: rgba(8, 10, 14, 0.25); }
+.tc-stick-zone.held .tc-stick-base { display: block; }
+.tc-stick-base i { position: absolute; left: 50%; top: 50%; width: 54px; height: 54px; margin: -27px 0 0 -27px; border-radius: 50%;
+  background: radial-gradient(circle at 40% 35%, #e8eef6, #8f99a5); box-shadow: 0 3px 8px rgba(0, 0, 0, 0.6); }
+/* more */
+.tc-more {
+  position: absolute; top: calc(50px + var(--tc-safe-top)); right: calc(6px + var(--tc-safe-right)); max-width: min(480px, 70vw); max-height: calc(100% - 60px); overflow: auto;
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 5px; padding: 8px; border-radius: 12px;
+  background: rgba(8, 10, 14, 0.86); pointer-events: auto; z-index: 2;
+}
+.tc-more[hidden] { display: none; }
+#touch-ui .tc-more button { font-size: 12px; height: 40px; }
+.tc-rotate { display: none; }
+@media (orientation: portrait) {
+  .tc-rotate { display: block; position: absolute; left: 50%; top: 38%; transform: translateX(-50%); padding: 8px 14px; border-radius: 10px; background: rgba(8, 10, 14, 0.8); font-size: 14px; white-space: nowrap; }
+  .tc-stick-zone { width: 55%; top: 45%; }
+}
+@media (max-height: 420px) {
+  #touch-ui button { height: 34px; font-size: 12px; min-width: 36px; padding: 0 8px; }
+  .tc-left { top: calc(46px + var(--tc-safe-top)); }
+  .tc-thr { width: 56px; }
+  #touch-ui .tc-big { width: 66px; font-size: 10px; }
+}
+/* the 3D view's and the game's own bits that a phone has no room for while flying: the globe button, the scale, the
+   map credits (behind their ⓘ), the weather line (smaller, under the top buttons) */
+body.fly-touch .maplibregl-ctrl-top-left, body.fly-touch .maplibregl-ctrl-top-right, body.fly-touch .maplibregl-ctrl-scale { display: none !important; }
+body.fly-touch .maplibregl-ctrl-attrib.maplibregl-compact-show:not([open]) .maplibregl-ctrl-attrib-inner,
+body.fly-touch .maplibregl-ctrl-attrib:not([open]) .maplibregl-ctrl-attrib-inner { display: none; }
+body.fly-touch .maplibregl-ctrl-attrib { min-height: 20px; }
+body.fly-touch #wx-fx .wx-chip { top: calc(50px + var(--tc-safe-top)); font-size: 11px; padding: 2px 8px; opacity: 0.85; }
+body.fly-touch #pilot-menu { align-items: flex-start; overflow-y: auto; padding: calc(10px + var(--tc-safe-top)) 10px 10px; }
+body.fly-touch #pilot-menu .ps-card { width: min(560px, 100%); padding: 14px 16px; }
+body.fly-touch #pilot-menu .pm-buttons { grid-template-columns: 1fr 1fr; gap: 6px; }
+body.fly-touch #pilot-menu .pm-buttons button { padding: 10px 12px; min-height: 44px; }
+body.fly-touch #pilot-menu kbd { display: none; }
+#touch-ui button { white-space: nowrap; }
+@media (orientation: portrait) {
+  .tc-top { flex-wrap: wrap; }
+  .tc-group { gap: 3px; flex-wrap: wrap; }
+  #touch-ui .tc-top button { min-width: 34px; padding: 0 6px; font-size: 12px; }
+  .tc-left { top: calc(92px + var(--tc-safe-top)); }
+}
