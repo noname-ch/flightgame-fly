@@ -81,7 +81,7 @@
     x.ice = { wing: 0, eng: 0, probe: 'AUTO' };
     x.adirs = { ir: [0, 1, 2].map(() => ({ mode: 'NAV', ok: true, align: 0, att: 0, offT: 0 })), adr: [1, 1, 1], attHdg: 'NORM', airData: 'NORM' };
     x.gpws = { sys: 1, terr: 1, gs: 1, flap: 1, ldg3: 0, terrAhead: 0 };
-    x.misc = { evac: 0, evacT: 0, crewOxy: 1, rcdr: 0, emerExit: 'ARM', iceInd: 1, askid: 1, chrono: null, chronoRun: false, terrNd: [0, 0], burst: false,
+    x.misc = { evac: 0, evacT: 0, crewOxy: 1, rcdr: 0, emerExit: 'ARM', iceInd: 1, askid: 1, chrono: null, chronoRun: false, terrNd: [1, 0], burst: false,
       bright: { pfd1: 1, nd1: 1, pfd2: 1, nd2: 1, ewd: 1, sd: 1 }, ecp: null, all: 0, allT: 0, tocfg: 0, cleared: [], callT: 0,
       taxiCam: 0, oans: 0, oansRange: 1 };
   }

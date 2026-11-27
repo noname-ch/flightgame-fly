@@ -314,7 +314,8 @@ export class Deck {
       case 'fcu.FCUController.FD1': case 'fcu.FCUController.FD2': this.events.push({ e: 'press', btn: 'FD' }); break;
       case 'fcu.FCUController.LOC': this.events.push({ e: 'press', btn: 'LOC' }); break;
       case 'fcu.FCUController.APPR': this.events.push({ e: 'press', btn: 'APPR' }); break;
-      case 'fcu.setNDRange': this.events.push({ e: 'press', btn: n(1) > 0 ? 'RNG+' : 'RNG-' }); break;
+      // (the RANGE knobs: fcu.setNDRange(side, ±1), the captain's 0, the first officer's 1; left of 10 NM: ZOOM)
+      case 'fcu.setNDRange': this.events.push({ e: 'press', btn: `${n(0) ? 'ND2 ' : ''}RNG${n(1) > 0 ? '+' : '-'}` }); break;
       // (the ND's MODE knob: FlightGear's numbers 0 ROSE ILS, 1 ROSE VOR, 2 ROSE NAV, 3 ARC, 4 PLAN, one a click)
       case 'fcu.setCptND': case 'fcu.setFoND': {
         const p = name.endsWith('CptND') ? 'instrumentation/efis/mfd/pnl_mode-num' : 'instrumentation/efis[1]/mfd/pnl_mode-num';

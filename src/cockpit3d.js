@@ -775,6 +775,10 @@ function fgProp(name, x, was) {
     case 'instrumentation/mk-viii/inputs/discretes/momentary-flap-3-override': return set('gpwsLdg3', b(on));
     default: {
       let m;
+      // (the EFIS panels' option buttons, each side's own; LS)
+      const eb = efisButton(name);
+      if (eb) { if (pulse && FG.fmgc) FG.fmgc.press(`${eb[1] ? 'ND2' : 'ND'} ${eb[0]}`); return; }
+      if (/^controls\/cockpit\/ls-[12]-translate$/.test(name)) { if (pulse && FG.fmgc) FG.fmgc.press('LS'); return; }
       if ((m = name.match(/^controls\/navigation\/adirscp\/switches\/ir-(\d)-mode$/))) set('irMode', ['OFF', 'NAV', 'ATT'][Math.min(2, Math.max(0, Math.round(x)))], m[1] - 1);
       else if ((m = name.match(/^controls\/navigation\/adirscp\/lights\/adr-(\d)-off$/))) set('adr', b(!on), m[1] - 1);
       else if ((m = name.match(/^controls\/cockpit\/adr(\d)-translate$/))) { if (pulse && m[1] >= 1 && m[1] <= 3) set('adr', undefined, m[1] - 1); }
@@ -790,18 +794,25 @@ function fgProp(name, x, was) {
     }
   }
 }
-// The EFIS panels: the ND's MODE (FlightGear's numbers: 0 ROSE ILS, 1 ROSE VOR, 2 ROSE NAV, 3 ARC, 4 PLAN; the ND draws
-// every ROSE as ROSE NAV) and the VOR/ADF switches (1 VOR, -1 ADF; the left one needle 1, the right one needle 2).
-const ndModeOf = (x) => (Math.round(x) === 3 ? 'ARC' : Math.round(x) === 4 ? 'PLAN' : 'ROSE');
-function efisProp(name, x, M) {
-  const F = M && M.F;
-  if (!F || !F.nd) return;
-  if (name.endsWith('/mfd/pnl_mode-num')) F.nd.mode = ndModeOf(x);
-  else if (name.endsWith('/inputs/range-nm')) F.nd.range = Math.max(10, Math.min(320, x));
-  else if (name.endsWith('-vor-adf')) {
-    if (!F.nd.needle) F.nd.needle = ['OFF', 'OFF'];
-    F.nd.needle[name.endsWith('rh-vor-adf') ? 1 : 0] = x > 0.5 ? 'VOR' : x < -0.5 ? 'ADF' : 'OFF';
-  }
+// The EFIS panels, the captain's (instrumentation/efis) and the first officer's (efis[1]), each its own ND: MODE
+// (FlightGear's numbers: 0 ROSE ILS, 1 ROSE VOR, 2 ROSE NAV, 3 ARC, 4 PLAN; the ND draws ROSE LS and ROSE VOR as ROSE
+// NAV), RANGE (a click either way; left of 10 NM: ZOOM, the airport map) and the VOR/ADF switches (1 VOR, -1 ADF;
+// the left one needle 1, the right one needle 2).
+const ND_MODES = ['ROSE LS', 'ROSE VOR', 'ROSE', 'ARC', 'PLAN'];
+const ndModeOf = (x) => ND_MODES[Math.max(0, Math.min(4, Math.round(x)))];
+const efisSide = (name) => (name.startsWith('instrumentation/efis[1]') ? 1 : 0);
+function efisProp(name, x, M, was) {
+  const F = M && M.F, side = efisSide(name), nd = F && F.nds && F.nds[side];
+  if (!nd) return;
+  if (name.endsWith('/mfd/pnl_mode-num')) nd.mode = ndModeOf(x);
+  else if (name.endsWith('/inputs/range-nm')) M.turnRange(side, x < (was ?? nd.range) ? -1 : 1);
+  else if (name.endsWith('-vor-adf')) nd.needle[name.endsWith('rh-vor-adf') ? 1 : 0] = x > 0.5 ? 'VOR' : x < -0.5 ? 'ADF' : 'OFF';
+}
+// An EFIS option button by the property its push moves (controls/cockpit/arpt-1-translate): [option, side].
+const EFIS_BTN = { cstr: 'CSTR', wpt: 'WPT', vor: 'VOR.D', ndb: 'NDB', arpt: 'ARPT' };
+function efisButton(name) {
+  const m = name.match(/^controls\/cockpit\/(cstr|wpt|vor|ndb|arpt)-([12])-translate$/);
+  return m ? [EFIS_BTN[m[1]], m[2] === '2' ? 1 : 0] : null;
 }
 // (the A320 deck's two engine controls on a four-engined aircraft: the left one works engines 1 and 2, the right 3 and 4)
 const engsOf = (side, n) => (n === 4 ? (side ? [2, 3] : [0, 1]) : [side ? n - 1 : 0]);
@@ -843,7 +854,7 @@ function fgSync(dt) {
       case 'parking': s.parking = e.on; P.api.say(e.on ? 'Parking brake set' : 'Parking brake released', 'info', 1500); break;
       case 'prop':
         if (e.name === 'ecp') { if (y) y.set('ecp', e.key); }
-        else if (e.name.startsWith('instrumentation/efis')) efisProp(e.name, e.x, M);
+        else if (e.name.startsWith('instrumentation/efis')) efisProp(e.name, e.x, M, e.was);
         else fgProp(e.name, e.x, e.was);
         break;
       default:
@@ -858,6 +869,7 @@ function fgSync(dt) {
     const set = (k, v) => d.set(k, v);
     set('controls/switches/strobe', tri(L.strobe, 'OFF', 'AUTO'));
     set('controls/switches/beacon', b(L.beacon));
+    if (X.terrNd) { set('controls/switches/terr_on_nd_l', b(X.terrNd[0])); set('controls/switches/terr_on_nd_r', b(X.terrNd[1])); }
     set('controls/switches/wing-lights', b(L.wing));
     set('controls/lighting/nav-lights-switch', b(L.nav));
     set('controls/lighting/turnoff-light-switch', b(L.rwy));
@@ -956,15 +968,18 @@ function fgSync(dt) {
     d.set('it-autoflight/output/fd1', M.F.fd ? 1 : 0); d.set('it-autoflight/output/fd2', M.F.fd ? 1 : 0);
     d.set('it-autoflight/output/loc-arm', M.F.locBtn || M.F.appr ? 1 : 0); d.set('it-autoflight/output/gs-arm', M.F.appr ? 1 : 0);
     d.set('controls/autobrake/mode', { LO: 1, MED: 2, MAX: 3 }[M.F.abrk] || 0);
-    // (the EFIS panels' knobs and switches where the ND has them; MODE left on ROSE ILS or ROSE VOR stays there)
-    if (M.F.nd) {
-      const nd = M.F.nd, sw = (k) => ({ VOR: 1, ADF: -1 }[nd.needle && nd.needle[k]] || 0);
-      for (const e of ['instrumentation/efis', 'instrumentation/efis[1]']) {
-        d.set(`${e}/inputs/range-nm`, nd.range);
-        if (ndModeOf(d.get(`${e}/mfd/pnl_mode-num`)) !== nd.mode) d.set(`${e}/mfd/pnl_mode-num`, { ARC: 3, PLAN: 4 }[nd.mode] ?? 2);
+    // (each EFIS panel's knobs, switches and option lights as its ND has them: the captain's efis, the first
+    // officer's efis[1]; the RANGE knob stays at its 10 NM mark while at ZOOM, which this deck's knob has no mark for)
+    if (M.F.nds) {
+      M.F.nds.forEach((nd, k) => {
+        const e = k ? 'instrumentation/efis[1]' : 'instrumentation/efis', sw = (n) => ({ VOR: 1, ADF: -1 }[nd.needle[n]] || 0);
+        d.set(`${e}/inputs/range-nm`, Math.max(10, nd.range));
+        d.set(`${e}/mfd/pnl_mode-num`, Math.max(0, ND_MODES.indexOf(nd.mode)));
         d.set(`${e}/input/lh-vor-adf`, sw(0));
         d.set(`${e}/input/rh-vor-adf`, sw(1));
-      }
+        for (const [o, p] of [['CSTR', 'CSTR'], ['WPT', 'wpt'], ['VOR.D', 'VORD'], ['NDB', 'NDB'], ['ARPT', 'arpt']]) d.set(`${e}/inputs/${p}`, nd.opt === o ? 1 : 0);
+      });
+      d.set('modes/pfd/ILS1', M.F.ls ? 1 : 0); d.set('modes/pfd/ILS2', M.F.ls ? 1 : 0);
     }
     // (the FCU's labels, dashes and managed dots: FlightGear's rules light them from these: SPD or MACH, HDG V/S or
     // TRK FPA, dashes where a window shows none, the dots for managed speed, NAV and the managed altitude)
@@ -1276,38 +1291,16 @@ function taxiCamScreen(c, W, H, P) {
   }, 'NOSE GEAR');
   if (!groundOf(P)) { c.fillStyle = '#ffb000'; c.textAlign = 'center'; c.fillText('NO AIRPORT DATA', W / 2, H * 0.3); }
 }
-// The A330neo's airport map (OANS) on the ND: the stands, taxiways, runways and buildings round you, heading up.
+// The A330neo's OANS button: the airport map (src/oans.js) on both NDs at its trackball's range, whatever their
+// RANGE knobs say; each ND heading up or north up as its MODE knob says.
 function oansScreen(c, W, H, P, side) {
-  const s = P.state, sys = SYS(), X = sys && sys.S.misc;
-  const range = (X && X.oansRange) || 1, cx = W / 2, cy = H * 0.66, ppm = (H * 0.56) / (range * 1852);
-  c.fillStyle = '#05070a'; c.fillRect(0, 0, W, H);
-  c.save(); c.beginPath(); c.rect(0, H * 0.08, W, H * 0.86); c.clip();
-  const project = ([x, y]) => [cx + x * ppm, cy - y * ppm];
-  const g = drawGround(c, P, project, { plan: true });
-  if (g && g.lay && range <= 2) {
-    const xy = localXY(s);
-    c.fillStyle = '#ff4fd8'; c.font = `600 ${Math.round(H * 0.026)}px system-ui, sans-serif`; c.textAlign = 'center'; c.textBaseline = 'middle';
-    for (const st of g.lay.stands || []) {
-      const [x, y] = xy(st[0], st[1]);
-      if (Math.abs(x) * ppm > W || Math.abs(y) * ppm > H) continue;
-      const [u, v] = project([x, y]);
-      c.fillRect(u - 2, v - 2, 4, 4);
-      if (st[3] && range <= 1) c.fillText(st[3], u, v - H * 0.02);
-    }
-  }
+  const sys = SYS(), X = sys && sys.S.misc, M = FM();
+  const nd = (M && M.F.nds && M.F.nds[side]) || { mode: 'ARC' };
+  c.fillStyle = '#000'; c.fillRect(0, 0, W, H);
+  const k = Math.min(W, H) / 324;
+  c.save(); c.translate((W - 324 * k) / 2, (H - 324 * k) / 2); c.scale(k, k);
+  FG.oans.draw(c, { mode: nd.mode, range: (X && X.oansRange) || 1 }, side);
   c.restore();
-  // you: the yellow aircraft symbol at its size
-  const B = bodyOf(P), k = Math.max(1, B.len * ppm / 2);
-  c.strokeStyle = '#ffd60a'; c.lineWidth = 3;
-  c.beginPath(); c.moveTo(cx, cy - k); c.lineTo(cx, cy + k); c.moveTo(cx - Math.max(6, B.span * ppm / 2), cy); c.lineTo(cx + Math.max(6, B.span * ppm / 2), cy);
-  c.moveTo(cx - k * 0.35, cy + k * 0.85); c.lineTo(cx + k * 0.35, cy + k * 0.85); c.stroke();
-  c.fillStyle = '#e8eef8'; c.font = `600 ${Math.round(H * 0.04)}px system-ui, sans-serif`; c.textAlign = 'left'; c.textBaseline = 'middle';
-  c.fillText(`OANS ${g ? g.code : '----'}`, W * 0.03, H * 0.04);
-  c.fillStyle = '#30d158'; c.fillText(`GS ${Math.round((s.gsMs != null ? s.gsMs : s.V) / 0.514444)}`, W * 0.03, H * 0.97);
-  c.textAlign = 'right'; c.fillStyle = '#4fd6ff'; c.fillText(`${range} NM`, W * 0.97, H * 0.97);
-  c.fillStyle = '#e8eef8'; c.fillText(`HDG ${String(Math.round(((s.psi || 0) % 360 + 360) % 360)).padStart(3, '0')}`, W * 0.97, H * 0.04);
-  if (!g) { c.textAlign = 'center'; c.fillStyle = '#ffb000'; c.fillText('ARPT NOT IN DATABASE', W / 2, H * 0.4); }
-  void side;
 }
 
 // The information system: a page of the flight's papers (departure, runway, weights, the checklist).
@@ -1348,7 +1341,7 @@ function pfdScreen(c, W, H, P) {
 }
 // The ND: the FMGC's (flight plan, modes, ranges) when it is on, else the plain one.
 function ndScreen(c, W, H, P, side = 0) {
-  { const x = SYS(); if (D.oans && x && x.S.misc && x.S.misc.oans) { oansScreen(c, W, H, P, side); return; } }
+  { const x = SYS(); if (D.oans && FG.oans && x && x.S.misc && x.S.misc.oans) { oansScreen(c, W, H, P, side); return; } }
   const M = FM();
   if (!M) { P.panel(c, 'nd', W, H); return; }
   c.fillStyle = '#000'; c.fillRect(0, 0, W, H);

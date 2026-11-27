@@ -57,16 +57,36 @@
   }
 
   // ---------- state ----------
+  // One ND as its EFIS panel sets it: the MODE knob (ROSE LS, ROSE VOR, ROSE (NAV), ARC, PLAN; the ND draws ROSE LS
+  // and ROSE VOR as ROSE NAV), the RANGE (NM; under 10 the knob is at ZOOM and the ND is the airport map at that
+  // range: src/oans.js), the airport map's range kept for the next time ZOOM is picked, the one EFIS option on
+  // (CSTR WPT VOR.D NDB ARPT, or null; ARPT: the airports round about drawn), the bearing needles (ADF / OFF / VOR).
+  const ndOf = () => ({ mode: 'ARC', range: 40, zoom: 1, arpt: true, opt: 'ARPT', needle: ['OFF', 'OFF'] });
+  // The MODE knob from left to right; the ranges (NM), the airport map's (ZOOM) first.
+  const ND_MODES = ['ROSE LS', 'ROSE VOR', 'ROSE', 'ARC', 'PLAN'];
+  const ND_RANGES = [0.2, 0.5, 1, 2, 5, 10, 20, 40, 80, 160, 320];
+  const setRange = (nd, r) => { nd.range = r; if (r < 10) nd.zoom = r; };
+  // The RANGE knob turned a click: left from 10 NM to ZOOM (the airport map at the range it had last), on left its
+  // ranges down to 0.2 NM.
+  function turnRange(nd, d) {
+    let k = ND_RANGES.findIndex((r) => r >= nd.range - 1e-6);
+    if (k < 0) k = 7;
+    let to = Math.max(0, Math.min(ND_RANGES.length - 1, k + Math.sign(d)));
+    if (nd.range >= 10 && to < 5) { to = ND_RANGES.indexOf(nd.zoom); if (to < 0) to = 4; }
+    setRange(nd, ND_RANGES[to]);
+  }
   const F = {
     on: false, ap1: false, ap2: false, fd: true, ls: true,
     fcu: { hdg: 0, alt: 5000, altInc: 1000, vs: 0, fpa: 0, trkFpa: false, spdPreset: null, hdgPreset: null, presetAt: 0, visible: true },
     lat: null, latArm: null, vert: null, vertArm: null, appr: false, locBtn: false, exped: false,
     altMgd: false, hdgMgd: false, plan: null, cmd: { bank: null, gamma: null }, abrk: null, abrkOn: false,
-    // the ND: mode, range, the one EFIS option on (CSTR WPT VOR.D NDB ARPT, or null), the bearing needles (ADF / OFF / VOR)
-    nd: { mode: 'ARC', range: 40, arpt: true, opt: 'ARPT', needle: ['OFF', 'OFF'] }, phase: 'PREFLIGHT', capVs: 1000, msgs: [],
+    // each pilot's ND as their EFIS panel sets it, the captain's and the first officer's (F.nd: the captain's)
+    nds: [ndOf(), ndOf()], phase: 'PREFLIGHT', capVs: 1000, msgs: [],
     // the MCDU's PERF page: take-off speeds and FLEX temperature, the approach's QNH, minimums and landing flaps
     perf: { v1: null, vr: null, v2: null, flex: null, qnh: null, mda: null, dh: null, ldgConf: 'FULL' }, fltNbr: '',
   };
+  // (F.nd: the captain's ND, as before there were two)
+  Object.defineProperty(F, 'nd', { get() { return F.nds[0]; }, set(v) { F.nds[0] = v; }, enumerable: false });
   const s = P.state;
   const apOn = () => F.ap1 || F.ap2;
   const altFt = () => s.h / FT;
@@ -651,15 +671,16 @@
       case 'FD': F.fd = !F.fd; break;
       case 'LS': F.ls = !F.ls; break;
       case 'ARPT': press('ND ARPT'); break;
-      case 'ND CSTR': case 'ND WPT': case 'ND VOR.D': case 'ND NDB': case 'ND ARPT': {
-        const o = btn.slice(3);
-        F.nd.opt = F.nd.opt === o ? null : o; // (one at a time, as on the EFIS panel)
-        F.nd.arpt = F.nd.opt === 'ARPT';
+      // (the captain's EFIS: 'ND …', NDMODE, RNG±; the first officer's 'ND2 …')
+      case 'ND CSTR': case 'ND WPT': case 'ND VOR.D': case 'ND NDB': case 'ND ARPT':
+      case 'ND2 CSTR': case 'ND2 WPT': case 'ND2 VOR.D': case 'ND2 NDB': case 'ND2 ARPT': {
+        const nd = F.nds[btn.startsWith('ND2') ? 1 : 0], o = btn.slice(btn.indexOf(' ') + 1);
+        nd.opt = nd.opt === o ? null : o; // (one at a time, as on the EFIS panel)
+        nd.arpt = nd.opt === 'ARPT';
         break;
       }
-      case 'NDMODE': F.nd.mode = { ARC: 'ROSE', ROSE: 'PLAN', PLAN: 'ARC' }[F.nd.mode]; break;
-      case 'RNG+': F.nd.range = Math.min(320, F.nd.range * 2); break;
-      case 'RNG-': F.nd.range = Math.max(10, F.nd.range / 2); break;
+      case 'NDMODE': case 'ND2 MODE': { const nd = F.nds[btn.startsWith('ND2') ? 1 : 0]; nd.mode = { ARC: 'ROSE', ROSE: 'PLAN' }[nd.mode] || 'ARC'; break; }
+      case 'RNG+': case 'RNG-': case 'ND2 RNG+': case 'ND2 RNG-': turnRange(F.nds[btn.startsWith('ND2') ? 1 : 0], btn.endsWith('+') ? 1 : -1); break;
       case 'BRK LO': case 'BRK MED': case 'BRK MAX': {
         const m = btn.slice(4);
         F.abrk = F.abrk === m ? null : m;
@@ -709,8 +730,8 @@
   }
   function end() { F.on = false; F.ap1 = F.ap2 = false; FG.fmgc.panels(false); }
   function snapshot() {
-    const { fcu, nd, msgs, ...rest } = F;
-    const snap = structuredClone({ ...rest, fcu, nd, plan: null });
+    const { fcu, msgs, ...rest } = F;
+    const snap = structuredClone({ ...rest, fcu, plan: null });
     snap.planActive = F.plan ? F.plan.active : null;
     snap.planLegFrom = F.plan ? F.plan.legFrom : null;
     return snap;
@@ -816,11 +837,12 @@
   // ---------- ND layers ----------
   // EGPWS terrain: heights round the aircraft looked up every few seconds (FG.flat), painted by how high they are
   // against the aircraft: red more than 2000 ft above, amber up to 500 ft below, green to 2000 ft below
-  let terr = null, terrBusy = false;
-  function drawTerrain(c, here, up, range, xy, ppn) {
-    const now = performance.now();
-    if (FG.flat && !terrBusy && (!terr || now - terr.at > 3000 || terr.range !== range || gcDist(here, terr.c) > range / 8)) {
-      terrBusy = true;
+  // (each ND its own: the two can be at different ranges)
+  const terrs = [null, null], terrBusy = [false, false];
+  function drawTerrain(c, here, up, range, xy, ppn, side) {
+    const now = performance.now(), terr = terrs[side];
+    if (FG.flat && !terrBusy[side] && (!terr || now - terr.at > 3000 || terr.range !== range || gcDist(here, terr.c) > range / 8)) {
+      terrBusy[side] = true;
       const N = 26, pts = [], ll = [];
       for (let i = 0; i < N; i++) for (let j = 0; j < N; j++) {
         const ex = (i / (N - 1) * 2 - 1) * range, ny = (j / (N - 1) * 2 - 1) * range;
@@ -829,7 +851,7 @@
         pts.push([p.lat, p.lon]); ll.push(p);
       }
       const z = range <= 20 ? 11 : range <= 80 ? 10 : 9;
-      FG.flat.heightsAt(pts, z).then((hs) => { terr = { at: performance.now(), range, c: here, pts: ll, h: hs, cell: (2 * range / (N - 1)) }; }, () => {}).finally(() => { terrBusy = false; });
+      FG.flat.heightsAt(pts, z).then((hs) => { terrs[side] = { at: performance.now(), range, c: here, pts: ll, h: hs, cell: (2 * range / (N - 1)) }; }, () => {}).finally(() => { terrBusy[side] = false; });
     }
     if (!terr) return;
     const alt = s.h, sz = terr.cell * ppn;
@@ -845,12 +867,13 @@
     });
   }
   // VOR.D / NDB: the navaids (src/data/navdata.js); WPT: the towns the MCDU knows as waypoints
-  let optList = null, optAt = 0, optKey = '';
-  function drawOpt(c, here, range, xy) {
-    const now = performance.now(), key = `${F.nd.opt}|${range}`;
-    if (!optList || now - optAt > 2000 || key !== optKey) {
-      optAt = now; optKey = key;
-      if (F.nd.opt === 'WPT') {
+  const opts = [{ list: null, at: 0, key: '' }, { list: null, at: 0, key: '' }];
+  function drawOpt(c, here, range, xy, nd, side) {
+    const now = performance.now(), key = `${nd.opt}|${range}`, O = opts[side];
+    let optList = O.list;
+    if (!optList || now - O.at > 2000 || key !== O.key) {
+      O.at = now; O.key = key;
+      if (nd.opt === 'WPT') {
         optList = [];
         for (const t of FG.data.towns || []) {
           const name = Array.isArray(t) ? t[0] : t.name, p = Array.isArray(t) ? { lat: t[2], lon: t[3] } : t;
@@ -859,7 +882,8 @@
           if (d < range * 1.05) optList.push({ id: ident(name), lat: p.lat, lon: p.lon, pop: (Array.isArray(t) ? t[4] : t.pop) || 0, kind: 'W' });
         }
         optList.sort((a, b) => b.pop - a.pop); optList = optList.slice(0, 40);
-      } else optList = FG.radio ? FG.radio.navaidsNear(here, range * 1.05, F.nd.opt === 'NDB' ? 'N' : 'V VD D').slice(0, 50) : [];
+      } else optList = FG.radio ? FG.radio.navaidsNear(here, range * 1.05, nd.opt === 'NDB' ? 'N' : 'V VD D').slice(0, 50) : [];
+      O.list = optList;
     }
     c.font = '10px ui-monospace, monospace'; c.textAlign = 'left'; c.lineWidth = 1.3;
     for (const n of optList) {
@@ -896,11 +920,11 @@
     }
   }
   // the bearing needles: VOR (white) or ADF (green), single for 1, double for 2, and their stations at the bottom
-  function drawNeedles(c, here, up, cx, cy, rad, W, H) {
+  function drawNeedles(c, here, up, cx, cy, rad, W, H, nd) {
     const R2 = FG.radio && FG.radio.S;
     if (!R2) return;
     for (let k = 0; k < 2; k++) {
-      const sel = F.nd.needle[k];
+      const sel = nd.needle[k];
       if (sel === 'OFF') continue;
       const st = sel === 'VOR' ? R2.nav.vor[k] : R2.nav.adf[k];
       const col = sel === 'VOR' ? WHITE : GREEN;
@@ -922,14 +946,19 @@
       c.beginPath(); c.moveTo(cx + dx * r0, cy + dy * r0); c.lineTo(cx + dx * (r0 - 10) - dy * 5, cy + dy * (r0 - 10) + dx * 5); c.lineTo(cx + dx * (r0 - 10) + dy * 5, cy + dy * (r0 - 10) - dx * 5); c.closePath(); c.fillStyle = col; c.fill();
     }
   }
-  let ndAirports = null, ndAirAt = 0;
+  const ndAir = [{ list: null, at: 0, range: 0 }, { list: null, at: 0, range: 0 }];
+  // side: 0 the captain's ND, 1 the first officer's (each as its own EFIS panel sets it)
   function drawNd(c, side = 0) {
     const W = 324, H = 324;
+    side = side ? 1 : 0;
+    const nd = F.nds[side];
+    // the RANGE knob at ZOOM: the airport map (src/oans.js)
+    if (nd.range < 10 && FG.oans) { FG.oans.draw(c, nd, side); return; }
     c.save();
     c.fillStyle = 'rgba(0,0,0,0.9)'; c.beginPath(); c.roundRect ? c.roundRect(0, 0, W, H, 10) : c.rect(0, 0, W, H); c.fill();
     c.beginPath(); c.rect(0, 0, W, H); c.clip();
     const here = { lat: s.lat, lon: s.lon };
-    const mode = F.nd.mode, range = F.nd.range;
+    const mode = nd.mode, range = nd.range;
     const plan = mode === 'PLAN';
     const cx = W / 2, cy = mode === 'ARC' ? H - 44 : H / 2 + 6;
     const rad = mode === 'ARC' ? 238 : 118;
@@ -940,9 +969,9 @@
       return [cx + Math.sin(b) * d * ppn, cy - Math.cos(b) * d * ppn];
     };
     c.textBaseline = 'middle';
-    // the terrain (TERR ON ND) under everything else
+    // the terrain under everything else, with this side's TERR ON ND; never on the north-up PLAN
     const SY = FG.systems && FG.systems.S;
-    if (SY && SY.misc && (SY.misc.terrNd[side] || SY.misc.terrNd[1 - side]) && !plan) drawTerrain(c, here, up, range, xy, ppn);
+    if (SY && SY.misc && SY.misc.terrNd[side] && !plan) drawTerrain(c, here, up, range, xy, ppn, side);
     // compass
     c.strokeStyle = WHITE; c.fillStyle = WHITE; c.lineWidth = 1.2; c.font = '11px ui-monospace, Consolas, monospace'; c.textAlign = 'center';
     c.beginPath(); c.arc(cx, cy, rad, 0, Math.PI * 2); c.stroke();
@@ -967,11 +996,13 @@
     }
     // airports
     const now = performance.now();
-    if (F.nd.arpt && (!ndAirports || now - ndAirAt > 2000)) {
-      ndAirAt = now;
-      ndAirports = Object.values(G.airportByCode).filter((a) => !a.factory && Math.abs(a.lat - s.lat) < range / 50 && gcDist(here, a) < range * 1.1).slice(0, 60);
+    const NA = ndAir[side];
+    if (nd.arpt && (!NA.list || now - NA.at > 2000 || NA.range !== range)) {
+      NA.at = now; NA.range = range;
+      NA.list = Object.values(G.airportByCode).filter((a) => !a.factory && Math.abs(a.lat - s.lat) < range / 50 && gcDist(here, a) < range * 1.1).slice(0, 60);
     }
-    if (F.nd.arpt && ndAirports) {
+    const ndAirports = NA.list;
+    if (nd.arpt && ndAirports) {
       c.font = '10px ui-monospace, monospace'; c.textAlign = 'left';
       for (const a of ndAirports) {
         const [x, y] = xy(a);
@@ -981,7 +1012,7 @@
       }
     }
     // the EFIS option: navaids, waypoints
-    if (F.nd.opt === 'VOR.D' || F.nd.opt === 'NDB' || F.nd.opt === 'WPT') drawOpt(c, here, range, xy);
+    if (nd.opt === 'VOR.D' || nd.opt === 'NDB' || nd.opt === 'WPT') drawOpt(c, here, range, xy, nd, side);
     // the flight plan: green legs, the active waypoint white
     const p = F.plan;
     if (p) {
@@ -1000,7 +1031,7 @@
         c.strokeStyle = col; c.fillStyle = col; c.lineWidth = 1.5;
         c.beginPath(); c.moveTo(x, y - 5); c.lineTo(x + 5, y); c.lineTo(x, y + 5); c.lineTo(x - 5, y); c.closePath(); c.stroke();
         c.fillText(w.id, x + 8, y - 6);
-        if (F.nd.opt === 'CSTR' && w.alt != null) { c.fillStyle = MAGENTA; c.fillText(w.alt >= 10000 ? `FL${Math.round(w.alt / 100)}` : String(Math.round(w.alt / 10) * 10), x + 8, y + 6); }
+        if (nd.opt === 'CSTR' && w.alt != null) { c.fillStyle = MAGENTA; c.fillText(w.alt >= 10000 ? `FL${Math.round(w.alt / 100)}` : String(Math.round(w.alt / 10) * 10), x + 8, y + 6); }
       }
       // T/C and T/D
       for (const [d, lbl] of [[p.toc, 'T/C'], [p.tod, 'T/D']]) {
@@ -1023,7 +1054,7 @@
     drawTraffic(c, here, up, xy);
     c.restore(); c.save();
     // the bearing needles (EFIS ADF / VOR switches; src/radio.js tunes them)
-    if (!plan) drawNeedles(c, here, up, cx, cy, rad, W, H);
+    if (!plan) drawNeedles(c, here, up, cx, cy, rad, W, H, nd);
     // the aircraft
     c.strokeStyle = '#ffd60a'; c.lineWidth = 3;
     if (plan) {
@@ -1050,7 +1081,7 @@
       c.fillText(`${String(eta.getHours()).padStart(2, '0')}${String(eta.getMinutes()).padStart(2, '0')}`, W - 8, 43);
     }
     c.textAlign = 'left'; c.fillStyle = WHITE; c.font = '10px ui-monospace, monospace';
-    c.fillText(`${mode === 'ROSE' ? 'ROSE NAV' : mode}  ${range} NM${F.nd.opt ? `  ${F.nd.opt}` : ''}`, 8, H - 10);
+    c.fillText(`${mode === 'ROSE' ? 'ROSE NAV' : mode}  ${range} NM${nd.opt ? `  ${nd.opt}` : ''}`, 8, H - 10);
     const RS = FG.radio && FG.radio.S;
     if (RS && RS.xpdr.tcas !== 'STBY' && RS.xpdr.mode !== 'STBY' && !plan) { c.fillStyle = RS.xpdr.tcas === 'TA' ? '#4fd6ff' : WHITE; c.fillText(RS.xpdr.tcas === 'TA' ? 'TA ONLY' : 'TCAS', 8, H - 24); }
     if (l && F.ls) { c.textAlign = 'right'; c.fillStyle = MAGENTA; c.fillText(`ILS ${l.e.code}${l.e.name} ${(l.d / 1852).toFixed(1)}`, W - 8, H - 10); }
@@ -1083,6 +1114,8 @@
     control, pilotInput, managedSpeed, begin, end, snapshot, restore,
     apToggle, engage, disconnect, turn, push, pull, press, directTo, buildPlan, predict, dtg, ils,
     drawFma, drawFd, drawTapes, drawNd, sounds,
+    // the EFIS's MODE knob positions and RANGE ladder (ZOOM: under 10 NM), a side's RANGE set or turned a click
+    ND_MODES, ND_RANGES, setRange: (side, r) => setRange(F.nds[side ? 1 : 0], r), turnRange: (side, d) => turnRange(F.nds[side ? 1 : 0], d),
     // the conventional-law pitch loop's gains (alpha rate per degree of path error, per degree/s of path change)
     tune: { kp: 0.5, kd: 1.2, flareKp: 0.7, flareKd: 2.0 },
     fcuToggle() { F.fcu.visible = !F.fcu.visible; FG.fmgc.panels(F.on); },

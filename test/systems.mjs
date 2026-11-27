@@ -312,6 +312,80 @@ try {
   if (nd2.needle[0] !== 'VOR') errors.push(`a click on the VOR/ADF switch 1 did not show the VOR needle (${nd2.needle[0]})`);
   if (nd2.mode !== 'ARC' || nd2.range !== nd0.range) errors.push(`the ND knobs did not turn back (${nd2.mode} ${nd2.range})`);
   await evaluate(() => { FG.fmgc.F.nd.needle[0] = 'OFF'; });
+  // (each pilot's own EFIS: the captain's knobs left the first officer's ND; RANGE left of 10 NM is ZOOM, the airport
+  // map at the range it had last, on down to 0.2 NM and back; TERR ON ND the captain's on at the start, each its own
+  // button and light; ARPT lit at the start, CSTR takes over, one at a time)
+  const efis = await evaluate(async () => {
+    const dk = FG.cockpit3d.pit.fg.deck, F = FG.fmgc.F, out = [];
+    const picks = (l) => dk.def.picks.map((p, i) => (p.label === l ? i : -1)).filter((i) => i >= 0);
+    const frame = () => new Promise((r) => { const t0 = performance.now(); const go = () => { FG.view3d.map.triggerRepaint(); if (FG.cockpit3d.drawnAt > t0 + 30) r(); else setTimeout(go, 50); }; go(); });
+    const [rng] = picks('ND range'), [mode] = picks('ND mode');
+    const fo0 = { ...F.nds[1] };
+    dk.press([mode], 4); await frame();
+    if (F.nds[0].mode !== 'ROSE') out.push(`MODE one click left of ARC: ${F.nds[0].mode} (wanted ROSE NAV)`);
+    dk.press([mode], 4); await frame();
+    if (F.nds[0].mode !== 'ROSE VOR') out.push(`MODE two clicks left of ARC: ${F.nds[0].mode} (wanted ROSE VOR)`);
+    if (F.nds[1].mode !== fo0.mode || F.nds[1].range !== fo0.range) out.push(`the F/O's ND moved with the captain's knobs (${F.nds[1].mode} ${F.nds[1].range})`);
+    dk.press([mode], 3); dk.press([mode], 3); await frame();
+    if (F.nds[0].mode !== 'ARC') out.push(`MODE back to ARC: ${F.nds[0].mode}`);
+    FG.fmgc.setRange(0, 10); await frame();
+    dk.press([rng], 4); await frame();
+    if (!(F.nds[0].range < 10 && F.nds[0].range === F.nds[0].zoom)) out.push(`RANGE left of 10 NM: ${F.nds[0].range} (wanted ZOOM at ${F.nds[0].zoom})`);
+    for (let i = 0; i < 6; i++) { dk.press([rng], 4); await frame(); }
+    if (F.nds[0].range !== 0.2) out.push(`ZOOM's shortest range: ${F.nds[0].range} (wanted 0.2)`);
+    for (let i = 0; i < 5; i++) { dk.press([rng], 3); await frame(); }
+    if (F.nds[0].range !== 10) out.push(`out of ZOOM again: ${F.nds[0].range} (wanted 10)`);
+    F.nds[0].range = 40;
+    const S = FG.systems.S.misc;
+    if (S.terrNd[0] !== 1 || S.terrNd[1] !== 0) out.push(`TERR ON ND at the start: ${S.terrNd} (wanted 1,0)`);
+    await frame();
+    if (dk.get('controls/indicators/terr-on-nd-capt') !== 1) out.push('the captain\'s TERR ON ND not lit');
+    const terr = picks('Show terrain on ND');
+    if (terr.length !== 2) out.push(`TERR ON ND buttons: ${terr.length} (wanted 2)`);
+    for (const k of terr) { dk.press([k], 0); await frame(); }
+    if (S.terrNd[0] !== 0 || S.terrNd[1] !== 1) out.push(`both TERR ON ND pressed: ${S.terrNd} (wanted 0,1)`);
+    if (dk.get('controls/indicators/terr-on-nd-fo') !== 1) out.push('the F/O\'s TERR ON ND not lit');
+    for (const k of terr) { dk.press([k], 0); await frame(); }
+    if (F.nds[0].opt !== 'ARPT' || dk.get('controls/indicators/efis-capt-arpt') !== 1) out.push(`ARPT at the start: ${F.nds[0].opt}, light ${dk.get('controls/indicators/efis-capt-arpt')}`);
+    const [cstr] = picks('Toggle CSTR layer');
+    dk.press([cstr], 0); await frame();
+    if (F.nds[0].opt !== 'CSTR') out.push(`CSTR pressed: ${F.nds[0].opt}`);
+    if (dk.get('controls/indicators/efis-capt-arpt') !== 0 || dk.get('controls/indicators/efis-capt-cstr') !== 1) out.push('CSTR pressed: the ARPT and CSTR lights did not follow');
+    if (F.nds[1].opt !== 'ARPT') out.push(`the F/O's EFIS option moved with the captain's: ${F.nds[1].opt}`);
+    dk.press([cstr], 0); FG.fmgc.press('ND ARPT'); await frame();
+    return out;
+  });
+  errors.push(...efis);
+  // (the airport map: the captain's ND at ZOOM 1 NM draws Zurich's aprons, taxiways and their yellow lines, the
+  // runway's white paint; the first officer's at 40 NM does not)
+  await evaluate(() => FG.fmgc.setRange(0, 1));
+  await waitFor(() => FG.layouts.has('ZRH'), 15000);
+  await sleep(2500);
+  const zoom = await evaluate(() => {
+    const count = (sc) => {
+      const d = sc.ctx.getImageData(0, 0, sc.cv.width, sc.cv.height).data, near = (i, c) => Math.abs(d[i] - c[0]) < 14 && Math.abs(d[i + 1] - c[1]) < 14 && Math.abs(d[i + 2] - c[2]) < 14;
+      const n = { apron: 0, taxi: 0, paint: 0, white: 0 };
+      for (let i = 0; i < d.length; i += 4) {
+        if (near(i, [54, 59, 68])) n.apron++; else if (near(i, [84, 90, 100])) n.taxi++; else if (near(i, [236, 196, 60])) n.paint++;
+        else if (d[i] > 230 && d[i + 1] > 230 && d[i + 2] > 230) n.white++;
+      }
+      return n;
+    };
+    const nds = FG.cockpit3d.pit.screens.filter((x) => x.kind === 'nd');
+    return { cap: count(nds.find((x) => !x.side) || nds[0]), fo: nds.length > 1 ? count(nds.find((x) => x.side) || nds[1]) : null, code: FG.oans.nearest(FG.pilot.state) };
+  });
+  if (zoom.code !== 'ZRH') errors.push(`the airport map's airport: ${zoom.code} (wanted ZRH)`);
+  if (zoom.cap.apron + zoom.cap.taxi < 2000 || zoom.cap.paint < 100 || zoom.cap.white < 200) errors.push(`the airport map at ZOOM 1 NM: ${JSON.stringify(zoom.cap)}`);
+  if (zoom.fo && zoom.fo.paint > 50) errors.push(`the F/O's ND at 40 NM has the airport map's yellow lines: ${JSON.stringify(zoom.fo)}`);
+  console.log('    airport map pixels:', JSON.stringify(zoom));
+  await screenShot('nd', 'A320-zoom-1nm');
+  await evaluate(() => { FG.fmgc.setRange(0, 0.5); });
+  await sleep(1200);
+  await screenShot('nd', 'A320-zoom-0.5nm');
+  await evaluate(() => { const nd = FG.fmgc.F.nds[0]; FG.fmgc.setRange(0, 2); nd.mode = 'PLAN'; });
+  await sleep(1200);
+  await screenShot('nd', 'A320-zoom-2nm-plan');
+  await evaluate(() => { const nd = FG.fmgc.F.nds[0]; nd.mode = 'ARC'; nd.range = 40; });
   await look(25, -40);
   await shot('a320-pedestal');
   // (the engine master: a right click turns it OFF)
@@ -415,6 +489,13 @@ try {
     for (const o of ['CSTR', 'WPT', 'VOR.D', 'NDB', 'ARPT', null]) { FG.fmgc.F.nd.opt = o; FG.fmgc.F.nd.needle = ['VOR', 'ADF']; try { FG.fmgc.drawNd(x, 0); } catch (e) { out.push(`ND ${o}: ${e.message}`); } }
     FG.fmgc.F.nd.opt = 'ARPT'; FG.fmgc.F.nd.needle = ['OFF', 'OFF'];
     FG.systems.S.misc.terrNd[0] = 1; try { FG.fmgc.drawNd(x, 0); } catch (e) { out.push(`ND TERR: ${e.message}`); } FG.systems.S.misc.terrNd[0] = 0;
+    // (the first officer's ND, every MODE, and the airport map at each ZOOM range on both)
+    { const F = FG.fmgc.F, keep = structuredClone(F.nds);
+      for (const side of [0, 1]) for (const m of FG.fmgc.ND_MODES) for (const r of [5, 2, 1, 0.5, 0.2, 40]) {
+        F.nds[side].mode = m; FG.fmgc.setRange(side, r);
+        try { FG.fmgc.drawNd(x, side); } catch (e) { out.push(`ND ${side} ${m} ${r}: ${e.message}`); }
+      }
+      F.nds = keep; }
     FG.mcdu.show(true);
     for (const f of ['DATA', 'FUEL PRED', 'SEC F-PLN', 'ATC COMM', 'MCDU MENU', 'PERF', 'RAD NAV', 'INIT', 'F-PLN', 'PROG', 'DIR']) {
       const b = document.querySelector(`#mcdu [data-f="${f}"]`); if (!b) { out.push(`MCDU key ${f}`); continue; } b.click();

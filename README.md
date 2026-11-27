@@ -160,7 +160,8 @@ rate; over 1,100 ft/min, gear up, a wing down or nose first is a crash (Enter tr
 
 **FCU** (top, as on the A320 glareshield, left to right):
 
-- **EFIS:** FD, LS, ARPT, the ND mode (ARC, ROSE NAV, PLAN) and range.
+- **EFIS** (the captain's on the left, the first officer's on the right, each for its own ND): FD, LS, CSTR, WPT,
+  VOR.D, NDB, ARPT, the ND mode (ARC, ROSE NAV, PLAN) and range; − past 10 NM goes to ZOOM, the airport map.
 - **SPD/MACH, HDG/TRK, ALT, V/S/FPA windows with their knobs:**
   - The mouse wheel turns a knob (Shift: ×10).
   - Click to **push**: managed, the FMGC flies it (a dot in the window). On V/S, push levels off.
@@ -219,7 +220,7 @@ the built deck has them in 3D too):
 | Deck | Types | What it has of its own |
 |---|---|---|
 | `a330` | A330-200, A330-300 | The enhanced A330: LCD screens and the ISIS. |
-| `a330neo` | A330-900neo | Its EIS2: the trackball (CURSOR CTL) on the pedestal (9) with OANS, the airport map on both NDs (stands, taxiways, runways, buildings; 0.5 to 5 NM). |
+| `a330neo` | A330-900neo | Its EIS2: the trackball (CURSOR CTL) on the pedestal (9) with OANS, the airport map on both NDs whatever their RANGE knobs say (0.5 to 5 NM; the map ZOOM shows). |
 | `a340` | A340-300 | CRT screens and the three round standby instruments (horizon, airspeed, altimeter). |
 | `a346` | A340-600 | LCDs, the ISIS and the TAXI CAMERA button on the pedestal (9): the fin camera's and the nose-gear camera's picture on the SD on the ground, with the main gear's and the nose wheel's guides over the taxiway (75 m long: the main gear runs 33 m behind you). |
 
@@ -311,14 +312,26 @@ CONFIG tests the take-off configuration.
 - **ECAM control panel, the ATT HDG and AIR DATA switching, the displays' brightness** (UPPER and LOWER DISPLAY), the
   ENG masters and MODE, the MCDUs (the A350's keyboards open them too), PARK BRK.
 
-**The main panel:** each pilot's PFD and ND brightness and TERR ON ND (the terrain on the ND: red over 2000 ft above,
-amber up to 500 ft below, green to 2000 ft below), the CLOCK with UTC and its CHR chronometer, the A/SKID & N/W STRG
+**The main panel:** each pilot's PFD and ND brightness and TERR ON ND (the terrain on that pilot's ND: red over
+2000 ft above, amber up to 500 ft below, green to 2000 ft below; never on PLAN or the airport map; the captain's is on
+at the start, the first officer's off), the CLOCK with UTC and its CHR chronometer, the A/SKID & N/W STRG
 switch (off: no nose wheel steering and no anti-skid; braking hard at speed bursts the tyres), AUTO BRK.
 
-**The EFIS panels:** FD and LS; one of CSTR (the flight plan's altitudes), WPT (the towns the MCDU knows), VOR.D,
-NDB (the beacons) or ARPT on the ND; the ADF / VOR needles 1 and 2 (VORs tuned by themselves, or on RAD NAV);
-MODE and RANGE. On FlightGear's A320-family deck (the A320s, A330s and A340s) its own EFIS knobs and VOR/ADF switches
-do the same.
+**The EFIS panels:** one before each pilot, each setting that pilot's own ND, as in the real aircraft. FD and LS; one
+of CSTR (the flight plan's altitudes), WPT (the towns the MCDU knows), VOR.D, NDB (the beacons) or ARPT (the airports
+round about) on the ND; the ADF / VOR needles 1 and 2 (VORs tuned by themselves, or on RAD NAV); MODE with its five
+positions (ROSE LS, ROSE VOR, ROSE NAV, ARC, PLAN; the ND draws ROSE LS and ROSE VOR as ROSE NAV) and RANGE. On
+FlightGear's A320-family deck (the A320s, A330s and A340s) each side's EFIS knobs, VOR/ADF switches and option buttons
+do the same, and their lights follow.
+
+**The airport map (ZOOM):** RANGE turned left past 10 NM goes to ZOOM, and the ND becomes the airport map (as
+Airbus's OANS) at 5, 2, 1, 0.5 or 0.2 NM (the knob keeps turning; back right past 5 NM is 10 NM again, and ZOOM next
+time opens at the range it had last). It draws the airport you are at or near (within 8 km) from its real layout on
+black: aprons and taxiways in greys with yellow centre lines, runways dark with white edges, threshold bars, piano
+keys and dashed centre lines and their names boxed at the ends, terminals blue with a light outline, hangars and other
+buildings darker; at 1 NM and less the stands' yellow lead-in lines and stop bars, at 0.5 NM and less their names;
+you in yellow, at your real size close in. Heading up in ARC and ROSE, north up in PLAN (src/oans.js; the same as the
+Rust app's).
 
 **The MCDU** also has DATA (position and IRS monitors, A/C status, look up a waypoint or navaid), FUEL PRED (fuel at
 the destination, extra), SEC F-PLN (copy, activate, delete), ATC COMM (an airport's ATIS by datalink), MCDU MENU

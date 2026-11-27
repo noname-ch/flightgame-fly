@@ -1,6 +1,7 @@
 // The A320 glareshield, as in the real cockpit from left to right: the captain's EFIS control panel (FD, LS, ND
 // mode and range, ARPT), the FCU (SPD/MACH, HDG/TRK, ALT, V/S/FPA windows with their knobs; SPD MACH, LOC, AP1, AP2,
-// A/THR, EXPED, APPR; HDG V/S - TRK FPA and the 100/1000 switch) and the AUTO BRK buttons.
+// A/THR, EXPED, APPR; HDG V/S - TRK FPA and the 100/1000 switch), the first officer's EFIS (their own ND) and the
+// AUTO BRK buttons. RANGE − past 10 NM goes to ZOOM: the ND is the airport map (5, 2, 1, 0.5, 0.2 NM).
 // Knobs: the mouse wheel turns them (Shift: ten at a time), a click PUSHES (managed: the FMGC flies it; V/S: level
 // off), a right-click PULLS (selected: the window's value). The small ‹ › PUSH PULL buttons do the same.
 (function () {
@@ -16,17 +17,23 @@
     </div>`;
   const btn = (id, label, cls = '') => `<button class="fcu-btn ${cls}" data-btn="${id}"><span class="bar"></span>${label}</button>`;
 
+  // an EFIS control panel: the captain's (side 0) or the first officer's (side 1), each for its own ND
+  const efis = (side) => {
+    const pre = side ? 'ND2 ' : '', who = side ? 'F/O' : 'CAPT';
+    return `
+      <div class="fcu-efis">
+        <div class="fcu-title">EFIS ${who}</div>
+        <div class="fcu-row">${btn('FD', 'FD')}${btn('LS', 'LS')}</div>
+        <div class="fcu-row">${['CSTR', 'WPT', 'VOR.D', 'NDB', 'ARPT'].map((o) => btn(`${side ? 'ND2' : 'ND'} ${o}`, o, 'fcu-opt')).join('')}</div>
+        <div class="fcu-row"><button class="fcu-sel" data-btn="${side ? 'ND2 MODE' : 'NDMODE'}" title="${who} ND mode">ARC</button>
+          <button class="fcu-sel" data-btn="${pre}RNG-" title="${who} ND range (left of 10 NM: ZOOM, the airport map)">−</button><span class="fcu-rng" data-side="${side}">40</span><button class="fcu-sel" data-btn="${pre}RNG+" title="${who} ND range">+</button></div>
+      </div>`;
+  };
+
   function build() {
     el = document.createElement('div');
     el.id = 'fcu';
-    el.innerHTML = `
-      <div class="fcu-efis">
-        <div class="fcu-title">EFIS</div>
-        <div class="fcu-row">${btn('FD', 'FD')}${btn('LS', 'LS')}</div>
-        <div class="fcu-row">${['CSTR', 'WPT', 'VOR.D', 'NDB', 'ARPT'].map((o) => btn(`ND ${o}`, o, 'fcu-opt')).join('')}</div>
-        <div class="fcu-row"><button class="fcu-sel" data-btn="NDMODE" title="ND mode">ARC</button>
-          <button class="fcu-sel" data-btn="RNG-" title="ND range">−</button><span class="fcu-rng">40</span><button class="fcu-sel" data-btn="RNG+" title="ND range">+</button></div>
-      </div>
+    el.innerHTML = `${efis(0)}
       <div class="fcu-main">
         <div class="fcu-col">
           <div class="fcu-lbls"><span data-l="SPD">SPD</span><span data-l="MACH">MACH</span></div>
@@ -59,7 +66,7 @@
           ${knob('vs', 'Vertical speed')}
           ${btn('APPR', 'APPR')}
         </div>
-      </div>
+      </div>${efis(1)}
       <div class="fcu-abrk">
         <div class="fcu-title">AUTO BRK</div>
         ${btn('BRK LO', 'LO')}${btn('BRK MED', 'MED')}${btn('BRK MAX', 'MAX')}
@@ -118,7 +125,7 @@
     if (!el || el.hidden) return;
     const q = (sel) => el.querySelector(sel);
     const set = (sel, txt) => { const n = q(sel); if (n.textContent !== txt) n.textContent = txt; };
-    const light = (id, on) => { const n = q(`[data-btn="${id}"]`); if (n) n.classList.toggle('lit', !!on); };
+    const light = (id, on) => { for (const n of el.querySelectorAll(`[data-btn="${id}"]`)) n.classList.toggle('lit', !!on); };
     const lbl = (id, on) => q(`[data-l="${id}"]`).classList.toggle('on', !!on);
     const w = windows();
     // SPD / MACH
@@ -140,14 +147,16 @@
     light('AP1', F.ap1); light('AP2', F.ap2); light('ATHR', s.athr && s.spec && s.spec.athr);
     light('LOC', F.locBtn && !F.appr); light('APPR', F.appr); light('EXPED', F.exped);
     light('FD', F.fd); light('LS', F.ls);
-    for (const o of ['CSTR', 'WPT', 'VOR.D', 'NDB', 'ARPT']) light(`ND ${o}`, F.nd.opt === o);
+    for (const o of ['CSTR', 'WPT', 'VOR.D', 'NDB', 'ARPT']) { light(`ND ${o}`, F.nds[0].opt === o); light(`ND2 ${o}`, F.nds[1].opt === o); }
     for (const m of ['LO', 'MED', 'MAX']) {
       const n = q(`[data-btn="BRK ${m}"]`);
       n.classList.toggle('lit', F.abrk === m);
       n.classList.toggle('decel', F.abrk === m && F.abrkOn);
     }
-    set('[data-btn="NDMODE"]', F.nd.mode === 'ROSE' ? 'ROSE NAV' : F.nd.mode);
-    set('.fcu-rng', String(F.nd.range));
+    F.nds.forEach((nd, k) => {
+      set(`[data-btn="${k ? 'ND2 MODE' : 'NDMODE'}"]`, nd.mode === 'ROSE' ? 'ROSE NAV' : nd.mode);
+      set(`.fcu-rng[data-side="${k}"]`, nd.range < 10 ? `ZOOM ${nd.range}` : String(nd.range));
+    });
   }
 
   FG.fcu = {

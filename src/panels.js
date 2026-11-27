@@ -293,21 +293,35 @@ export const MODULES = {
       pbC(108, 50, 58, { top: () => lit('MASTER', 'amber', S() && S().mc), bot: () => lit('CAUT', 'amber', S() && S().mc), click: () => set('masterCaut'), tip: 'MASTER CAUT: push to clear' }),
     ],
   }),
-  // an EFIS control panel: FD, LS, the ND's options (one at a time, as the real ones), mode and range
-  efis: () => ({
-    w: 300, h: 116,
-    paint: (T) => { T.plate(0, 0, 300, 116); T.label(142, 60, 'EFIS', 9, '#9aa1aa'); },
-    controls: [
-      fcuBtnC(30, 34, 44, 34, 'FD', () => !!(F() && F().fd), () => press('FD'), 'FD: the flight directors on the PFD'),
-      fcuBtnC(30, 84, 44, 34, 'LS', () => !!(F() && F().ls), () => press('LS'), 'LS: the ILS deviations on the PFD'),
-      ...['CSTR', 'WPT', 'VOR.D', 'NDB', 'ARPT'].map((l, i) => fcuBtnC(88 + i * 38, 26, 34, 28, l, () => !!(F() && F().nd && F().nd.opt === l), () => press(`ND ${l}`),
-        { CSTR: 'CSTR: the flight plan\'s altitudes at its waypoints', WPT: 'WPT: waypoints round you (the towns the MCDU knows)', 'VOR.D': 'VOR.D: VORs and DMEs', NDB: 'NDB: the NDBs', ARPT: 'ARPT: the airports' }[l])),
-      swC(60, 88, 16, '1', [['ADF', 'ADF'], ['OFF', 'OFF'], ['VOR', 'VOR']], () => (F() && F().nd.needle ? F().nd.needle[0] : 'OFF'), (v) => { const f = F(); if (f) f.nd.needle[0] = v; }, 'Bearing needle 1: ADF 1 · OFF · VOR 1'),
-      swC(98, 88, 16, '2', [['ADF', 'ADF'], ['OFF', 'OFF'], ['VOR', 'VOR']], () => (F() && F().nd.needle ? F().nd.needle[1] : 'OFF'), (v) => { const f = F(); if (f) f.nd.needle[1] = v; }, 'Bearing needle 2: ADF 2 · OFF · VOR 2'),
-      rotC(150, 90, 13, 'MODE', [['ROSE', 'ROSE'], ['ARC', 'ARC'], ['PLAN', 'PLAN']], () => (F() ? F().nd.mode : 'ARC'), (v) => { const f = F(); if (f) f.nd.mode = v; }, 'ND MODE: ROSE NAV · ARC · PLAN'),
-      rotC(236, 90, 13, 'RANGE', [[10, '10'], [20, '20'], [40, '40'], [80, '80'], [160, '160'], [320, '320']], () => (F() ? F().nd.range : 40), (v) => { const f = F(); if (f) f.nd.range = v; }, 'ND RANGE (NM)'),
-    ],
-  }),
+  // an EFIS control panel, the captain's (i 0) or the first officer's (i 1), each setting its own ND: FD, LS, the ND's
+  // options (one at a time, as the real ones), the VOR/ADF switches, MODE (its five positions) and RANGE (left of
+  // 10 NM: ZOOM, the airport map; the knob keeps turning down to 0.2 NM there)
+  efis: ({ i = 0 } = {}) => {
+    const nd = () => (F() && F().nds ? F().nds[i] : null);
+    const pre = i ? 'ND2 ' : 'ND ';
+    const range = rotC(236, 90, 13, 'RANGE', [['ZOOM', 'ZOOM'], [10, '10'], [20, '20'], [40, '40'], [80, '80'], [160, '160'], [320, '320']],
+      () => { const n = nd(); return !n ? 40 : n.range < 10 ? 'ZOOM' : n.range; }, () => {},
+      `${sideName(i)} ND RANGE (NM); left of 10: ZOOM, the airport map at 5, 2, 1, 0.5, 0.2 NM`);
+    range.sig = () => J(nd() && nd().range);
+    range.click = ({ fx, wheel }) => press(`${i ? 'ND2 ' : ''}RNG${(wheel ? wheel > 0 : fx >= 0) ? '+' : '-'}`);
+    const draw0 = range.draw;
+    range.draw = (T) => { draw0(T); const n = nd(); if (n && n.range < 10) T.label(272, 98, `${n.range} NM`, 8, '#3ccfff'); };
+    return {
+      w: 300, h: 116,
+      paint: (T) => { T.plate(0, 0, 300, 116); T.label(142, 60, 'EFIS', 9, '#9aa1aa'); },
+      controls: [
+        fcuBtnC(30, 34, 44, 34, 'FD', () => !!(F() && F().fd), () => press('FD'), 'FD: the flight directors on the PFD'),
+        fcuBtnC(30, 84, 44, 34, 'LS', () => !!(F() && F().ls), () => press('LS'), 'LS: the ILS deviations on the PFD'),
+        ...['CSTR', 'WPT', 'VOR.D', 'NDB', 'ARPT'].map((l, k) => fcuBtnC(88 + k * 38, 26, 34, 28, l, () => !!(nd() && nd().opt === l), () => press(`${pre}${l}`),
+          { CSTR: 'CSTR: the flight plan\'s altitudes at its waypoints', WPT: 'WPT: waypoints round you (the towns the MCDU knows)', 'VOR.D': 'VOR.D: VORs and DMEs', NDB: 'NDB: the NDBs', ARPT: 'ARPT: the airports' }[l])),
+        swC(60, 88, 16, '1', [['ADF', 'ADF'], ['OFF', 'OFF'], ['VOR', 'VOR']], () => (nd() ? nd().needle[0] : 'OFF'), (v) => { const n = nd(); if (n) n.needle[0] = v; }, 'Bearing needle 1: ADF 1 · OFF · VOR 1'),
+        swC(98, 88, 16, '2', [['ADF', 'ADF'], ['OFF', 'OFF'], ['VOR', 'VOR']], () => (nd() ? nd().needle[1] : 'OFF'), (v) => { const n = nd(); if (n) n.needle[1] = v; }, 'Bearing needle 2: ADF 2 · OFF · VOR 2'),
+        rotC(150, 90, 13, 'MODE', [['ROSE LS', 'LS'], ['ROSE VOR', 'VOR'], ['ROSE', 'NAV'], ['ARC', 'ARC'], ['PLAN', 'PLAN']], () => (nd() ? nd().mode : 'ARC'), (v) => { const n = nd(); if (n) n.mode = v; },
+          `${sideName(i)} ND MODE: ROSE LS · ROSE VOR · ROSE NAV · ARC · PLAN`),
+        range,
+      ],
+    };
+  },
   // the FCU: speed, heading, altitude and vertical speed windows with their knobs, the autopilot's buttons
   fcu: () => {
     const fw = 844.8, at = (f) => 6 + f * fw;
