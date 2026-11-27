@@ -132,7 +132,9 @@ handlers.push((msg) => {
         // (a map error object logged without its message: MapLibre's minified AJAXError and the like)
         if (/^[A-Za-z]{1,3}$/.test(text.trim())) { warnings.push(`map error: ${text}`); break; }
         // (a terrain tile the leveller could not download: the network again)
-        if (/^TypeError: Failed to fetch\s+at protocol \(\S*flatground\.js/.test(text)) { warnings.push('terrain tile did not download'); break; }
+        // (or a satellite picture or terrain tile through the prepared scenery's cache, the game's js/scenery.js)
+        if (/^TypeError: Failed to fetch\s+at (protocol|cachedFetch) \(\S*(flatground|scenery)\.js/.test(text)) { warnings.push('terrain tile did not download'); break; }
+        if (/^Error: satellite tile \d+/.test(text)) { warnings.push(`map tile: ${text.split('\n')[0]}`); break; }
         errors.push(`console.${p.type}: ${text}${where(p.stackTrace)}`);
       }
       break;
@@ -209,6 +211,19 @@ try {
   if (!(ss.props > 0 && ss.props < ss.cards)) errors.push(`start screen: the Propellers filter shows ${ss.props} of ${ss.cards}`);
   if (!ss.suggest.includes('GVA') || !ss.gvaRw) errors.push(`start screen: searching "genev" did not find Geneva and its runways: ${JSON.stringify(ss)}`);
   if (!/^12:00 local at GVA/.test(ss.clock) || !/crosswind/.test(ss.xwind)) errors.push(`start screen: time or wind not shown: ${JSON.stringify(ss)}`);
+  step('start screen: Scenery → Prepare an area opens the game\'s picker round the airport, Esc closes it');
+  const sc = await evaluate(() => {
+    const b = document.querySelector('#pilot-start [data-fs-scenery]');
+    if (!b || !FG.scenery) return { err: `button ${!!b}, FG.scenery ${!!FG.scenery}` };
+    b.click();
+    const side = document.querySelector('#scenery .sc-side');
+    const out = { open: !!side, round: !!(side && side.querySelector('[data-sc=km]')), est: side ? (side.textContent.match(/([\d,']+) files/) || [])[1] : null };
+    document.querySelector('#scenery').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    out.closed = !document.querySelector('#scenery');
+    out.startStill = !!document.getElementById('pilot-start');
+    return out;
+  });
+  if (sc.err || !sc.open || !sc.round || !sc.est || !sc.closed || !sc.startStill) errors.push(`start screen: prepare scenery: ${JSON.stringify(sc)}`);
   await evaluate(() => document.querySelector('#pilot-start [data-ps=go]').click());
   await waitFor(() => FG.pilot.active && !FG.pilot.state.loading, 20000, 'the A350 from the start screen');
   await sleep(1500);

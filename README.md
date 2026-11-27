@@ -44,6 +44,10 @@ It opens by itself, and again when you leave a flight. Pick:
 - **Wind**: the game's weather there, calm, or set by hand (direction and speed, placed round the airport as the
   game's developer tools place one). In the air the plane drifts with the wind, so it crabs into a crosswind and a
   headwind slows it over the ground. The wind comes in over the first 100 ft, and the ND shows GS, TAS and the wind.
+- **Scenery → 🗺 Prepare an area…**: click two corners on a map (or 20, 40 or 80 km round the airport), pick the
+  detail (good, sharp or very sharp; airports in it always get the sharpest pictures) and Prepare. Its satellite
+  pictures and heights are kept in the browser (the game's `js/scenery.js`), so that ground is sharp and there at
+  once when you fly over it, even offline. Prepared areas are listed there, with Show and delete.
 
 The last choices are kept for next time (localStorage `flightgame.fly.pick`). The link from the game
 (`?type=&from=&rw=&mode=&plane=`) presets them.

@@ -153,6 +153,8 @@
             <label>Speed <input id="fs-wkt" type="number" min="0" max="60" step="1"> kt</label>
           </div>
           <p class="fs-muted" id="fs-xwind"></p>
+          <h3>Scenery <span class="fs-muted" id="fs-scn"></span></h3>
+          <div class="fs-chips"><button data-fs-scenery="1" title="Pick an area on a map whose 3D ground is fetched ahead: sharp and there at once when you fly over it, even offline">🗺 Prepare an area…</button></div>
         </section>
       </div>
       <footer class="fs-foot">
@@ -364,7 +366,10 @@
     }
 
     // ---------- wiring ----------
-    function close() { clearInterval(shotsTimer); if (mapObj) { mapObj.remove(); mapObj = null; layer = null; } el.remove(); }
+    // (prepared scenery, the game's js/scenery.js: what is kept and what is being fetched)
+    const scenery = () => { const s = $('#fs-scn'); if (s && FG.scenery) s.textContent = FG.scenery.status(); };
+    if (FG.scenery) FG.scenery.onchange = scenery;
+    function close() { if (FG.scenery && FG.scenery.onchange === scenery) FG.scenery.onchange = null; clearInterval(shotsTimer); if (mapObj) { mapObj.remove(); mapObj = null; layer = null; } el.remove(); }
     function go() {
       err.textContent = '';
       const type = pick.type;
@@ -401,6 +406,7 @@
       else if (b.dataset.rw) { pick.end = ends[Number(b.dataset.rw)]; el.querySelectorAll('[data-rw]').forEach((x) => x.classList.toggle('on', x === b)); weather(); }
       else if (b.dataset.time) { pick.time = b.dataset.time; clock(); }
       else if (b.dataset.wind) { pick.wind = b.dataset.wind; runways(true); }
+      else if (b.dataset.fsScenery && FG.scenery) FG.scenery.open({ code: pick.code });
     });
     el.addEventListener('change', (e) => {
       const t = e.target;
@@ -430,7 +436,7 @@
     $('#ps-crz').value = String(pick.crz);
     if (!$('#ps-crz').value) $('#ps-crz').value = '340';
     ap.value = pick.code;
-    gallery(); finals(); runways(false); modes();
+    gallery(); finals(); runways(false); modes(); scenery();
     makeMap();
     setTimeout(() => { if (mapObj) mapObj.invalidateSize(); }, 50);
   }
