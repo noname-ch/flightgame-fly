@@ -920,6 +920,7 @@
       }
     }
     s.psi = wrap360(s.psi + psiRate * dt);
+    s.psiRate = psiRate;
     sway(dt, psiRate);
     s.h += s.V * Math.sin(s.gamma) * dt;
     // The air moves with the wind (the game's weather, or what the start screen set): in the air the plane drifts
@@ -1715,7 +1716,7 @@
     s.landed = true;
     const r = -fpm;
     const rating = r < 120 ? 'butter' : r < 300 ? 'smooth' : r < 600 ? 'firm' : 'HARD landing';
-    s.touch = { fpm: Math.round(fpm), rating, at: performance.now(), on: onRunway(), kt: Math.round(ias()) };
+    s.touch = { fpm: Math.round(fpm), rating, charmAge: 0, at: performance.now(), on: onRunway(), kt: Math.round(ias()) };
     if (s.theta > s.spec.tail) { s.tail = true; say('TAIL STRIKE', 'red', 5000); }
   }
 
@@ -1850,6 +1851,7 @@
     if (!s.paused && !s.menu && s.crashed && s.wreck) wreckStep(Math.min(dtAll, 0.1));
     else if (s.crashed && s.fire) startFire();
     if (!s.paused && !s.menu && !s.crashed) {
+      if (s.touch) s.touch.charmAge += Math.min(dtAll, 0.25);
       inputs(dtAll);
       let left = Math.min(dtAll, 0.25);
       while (left > 1e-6) { const dt = Math.min(0.02, left); if (FG.fmgc) FG.fmgc.control(dt); physics(dt); left -= dt; if (s.crashed) break; }
@@ -1857,6 +1859,24 @@
     if (FG.systems) FG.systems.step(dtAll);
     s.warn = s.crashed ? [] : warnings(); // (src/cocksnd.js sounds them)
     draw(s.warn);
+  }
+
+  // Same deflection for the 3D cord and the basic cockpit view.
+  function windowCharm() {
+    const bank = s.phi * DEG, pitch = s.theta * DEG;
+    const turnG = s.V * Math.cos(s.gamma) * (s.psiRate || 0) * DEG / G0;
+    const load = s.onGround ? 1 : clamp(s.load || 1, 0.3, 3);
+    let side = 0.55 * Math.sin(bank) - 0.38 * turnG * Math.cos(bank);
+    let fore = (-Math.sin(pitch) - 0.55 * ((s.TmD || 0) - Math.sin(s.gamma))) / load;
+    let bounce = 0;
+    if (s.touch && s.touch.charmAge < 3) {
+      const age = s.touch.charmAge;
+      const kick = clamp(Math.abs(s.touch.fpm) / 850, 0, 1) * Math.exp(-2.4 * age);
+      side += 0.70 * kick * Math.sin(21 * age);
+      fore += 0.70 * kick * Math.sin(17 * age);
+      bounce = 0.27 * kick * Math.sin(32 * age);
+    }
+    return [clamp(side, -0.75, 0.75), clamp(fore, -0.75, 0.75), bounce];
   }
 
   // The pose view3d draws: degrees, metres; altM: the wheels' height above the ground; st: as G.flightState gives,
@@ -1948,6 +1968,29 @@
     ['P   Esc', 'pause · menu (resume, checkpoint, start again, leave)'],
   ];
 
+  function drawWindowCharm(w, h) {
+    const [side, fore, bounce] = windowCharm();
+    const x = w * 0.29, y = 0;
+    const length = clamp(h * 0.105, 26, 78) * (1 - bounce);
+    const tipX = x + length * side;
+    const tipY = y + length * (1 - 0.22 * fore) / Math.hypot(side, fore, 1);
+    const radius = clamp(length * 0.085, 3, 8);
+    ctx.save();
+    ctx.strokeStyle = '#2b221c';
+    ctx.lineWidth = 1.4;
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.lineTo(tipX, tipY);
+    ctx.stroke();
+    for (const [scale, color] of [[1, '#2b221c'], [0.82, '#e1ad61'], [0.44, '#335b64']]) {
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.arc(tipX, tipY, radius * scale, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
   function draw(warn) {
     if (!hud || hud.hidden) return;
     const dpr = window.devicePixelRatio || 1;
@@ -1962,7 +2005,10 @@
     // PFD and engine display over the view only with I)
     const deck = s.cam === 'cockpit' && pit3d();
     const look = (FG.view3d && FG.view3d.look) || { yaw: 0, pitch: 0 };
-    if (s.cam === 'cockpit' && !deck) headUp(W, H);
+    if (s.cam === 'cockpit' && !deck) {
+      headUp(W, H);
+      drawWindowCharm(W, H);
+    }
     else if (deck && hudDeck() && Math.abs(look.yaw) < 4 && Math.abs(look.pitch) < 4) {
       // the head-up display only in its combiner glass in front of the captain (the A350's and A380's: the A320s,
       // A330s and A340s have none)
@@ -2613,7 +2659,7 @@
     get LOOK_DOWN() { return lookDownOf(); },
     panel,
     types: TYPES,
-    open: openDialog, start, stop, step, pose, fail,
+    open: openDialog, start, stop, step, pose, fail, windowCharm,
     setLever, menu: (on) => showMenu(on == null ? !s.menu : on), // (the touch controls, src/touch.js)
     get specs() { return s.spec; }, get conf() { return s.conf; }, confs: () => CONF, detents: () => DETENTS, detentName, // (fail: a failure from the menu, by its key: FAILS)
     runwayEnds, ends: runwayEnds, bestEnd, defaultAirport, // (for the start screen, src/select.js, and test/ap-test.js)

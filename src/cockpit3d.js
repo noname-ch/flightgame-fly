@@ -1900,6 +1900,45 @@ setInterval(() => {
 // Draw the cockpit over the world (view3d.js planeLayer, after its own pass). `sunB`: the sun in cockpit space
 // (x right, y ahead, z up; null under the horizon), `day` 0 … 1, `fov` the map's vertical field of view (°),
 // `look` the head's turn { yaw, pitch } (°).
+function makeWindowCharm() {
+  const mount = new THREE.Group();
+  const x = -EYE_X * 0.66, z = 0.275;
+  mount.position.set(x, frontY(x, z) - 0.045, z);
+  const dark = new THREE.MeshBasicMaterial({ color: 0x2b221c });
+  const brass = new THREE.MeshStandardMaterial({ color: 0xe1ad61, roughness: 0.5, metalness: 0.25 });
+  const enamel = new THREE.MeshStandardMaterial({ color: 0x335b64, roughness: 0.4 });
+  mount.add(new THREE.Mesh(new THREE.SphereGeometry(0.005, 8, 6), dark));
+
+  const swing = new THREE.Group();
+  const cord = new THREE.Mesh(new THREE.CylinderGeometry(0.0016, 0.0016, 1, 6), dark);
+  cord.rotation.x = Math.PI / 2;
+  const pendant = new THREE.Group();
+  pendant.add(new THREE.Mesh(new THREE.CylinderGeometry(0.009, 0.009, 0.003, 16), brass));
+  const face = new THREE.Mesh(new THREE.CircleGeometry(0.005, 16), enamel);
+  face.rotation.x = Math.PI / 2;
+  face.position.y = -0.0017;
+  pendant.add(face);
+  swing.add(cord, pendant);
+  mount.add(swing);
+  return { mount, swing, cord, pendant, direction: new THREE.Vector3() };
+}
+
+const charmDown = new THREE.Vector3(0, 0, -1);
+function poseWindowCharm(pit, pilot) {
+  if (!pit.windowCharm) {
+    pit.windowCharm = makeWindowCharm();
+    pit.scene.add(pit.windowCharm.mount);
+  }
+  const { swing, cord, pendant, direction } = pit.windowCharm;
+  const [side, fore, bounce] = pilot.windowCharm();
+  const length = 0.25 * (1 - bounce * 0.6);
+  direction.set(side, fore, -1).normalize();
+  swing.quaternion.setFromUnitVectors(charmDown, direction);
+  cord.scale.y = length;
+  cord.position.z = -length / 2;
+  pendant.position.z = -length;
+}
+
 export function draw(renderer, gl, { sunB, day, fov, look, lookDown }) {
   const P = FG.pilot;
   if (!P || !P.active) return;
@@ -1930,6 +1969,7 @@ export function draw(renderer, gl, { sunB, day, fov, look, lookDown }) {
   paintMcdus(now);
   if (pit.fg) fgSync(dt);
   if (pit.levers) poseControls(P.state);
+  poseWindowCharm(pit, P);
   // light: the sky, the sun, and the cockpit's own (dome, flood, the panels' integral lighting: INT LT)
   const sys = SYS();
   const L = sys ? sys.S.lt : null;

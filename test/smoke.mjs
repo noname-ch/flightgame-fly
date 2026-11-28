@@ -270,10 +270,22 @@ try {
         const pit = await evaluate(() => {
           const sc = FG.cockpit3d.pit.screens.find((x) => x.kind === 'pfdnd-c');
           const px = sc.ctx.getImageData(sc.cv.width * 0.25, sc.cv.height * 0.45, 1, 1).data; // (the PFD's sky or ground)
+          const charm = FG.cockpit3d.pit.windowCharm;
+          const projected = charm && FG.cockpit3d.project(charm.pendant.getWorldPosition(charm.direction.clone()).toArray());
+          const state = FG.pilot.state;
+          const original = state.touch;
+          const rest = FG.pilot.windowCharm();
+          const kick = (fpm) => {
+            state.touch = { fpm, charmAge: 0.08 };
+            return Math.hypot(...FG.pilot.windowCharm().map((v, i) => v - rest[i]));
+          };
+          const reacts = kick(-600) > 3 * kick(-120);
+          state.touch = original;
           FG.view3d.look.yaw = -60; // (a drag turns the head)
-          return { lit: px[0] + px[1] + px[2] > 60, eye: FG.pilot.LOOK_DOWN };
+          return { lit: px[0] + px[1] + px[2] > 60, eye: FG.pilot.LOOK_DOWN, projected, reacts };
         });
         if (!pit.lit) errors.push(`fly it yourself: the cockpit's PFD screen stayed blank: ${JSON.stringify(pit)}`);
+        if (!pit.projected?.every((v) => Math.abs(v) < 1) || !pit.reacts) errors.push(`fly it yourself: the windshield charm was out of view or did not react to touchdown: ${JSON.stringify(pit)}`);
         await evaluate(() => { FG.view3d.look.yaw = 0; FG.pilot.state.cam = 'chase'; FG.view3d.pilotCam('chase'); });
       }
       // checkpoint: Z keeps the flight, Backspace puts it back there (paused), even after a crash
