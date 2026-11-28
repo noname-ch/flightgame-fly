@@ -147,8 +147,10 @@ function quad(tl, tr, bl, br, mat) {
   return new THREE.Mesh(geo, mat);
 }
 
-function build(kind, nEng, graftOn = false) {
+function build(kind, nEng, graftOn = false, shell = null) {
   useDeck(kind);
+  // (with the free model's walls, roof, floor, seats and consoles: src/a350shell below; its numbers)
+  if (shell) { D = { ...D, ...SHELL_DECK }; ({ HALF, ROOF, REAR, FLOOR } = D); EYE_X = D.EYE_X; }
   // (with the A320's 3D modules grafted on: its layout without the painted glareshield and keyboards, the glareshield's
   // face leaning back as theirs do)
   const lay = graftOn ? `${kind}g` : kind, faceY = graftOn ? [0.03, 0.004] : [0, 0.03];
@@ -181,50 +183,53 @@ function build(kind, nEng, graftOn = false) {
   const clickable = (mesh, panel) => { mesh.userData.panel = panel; clickables.push(mesh); return mesh; };
   const wipers = [];
 
-  // windscreens and the walls round them, either side of the centre post
-  for (const s of [-1, 1]) {
-    const to = (u, v) => [s * u, frontY(u, v), v];
-    const outer = [[0, -0.40], [HALF, -0.40], [HALF, ROOF], [0, ROOF]]; // (below the glareshield's top: hidden)
-    const ring = grow(SCREEN, 0.045);
-    root.add(shapeMesh(outer, [ring], to, M.lining));
-    root.add(shapeMesh(ring, [SCREEN], (u, v) => { const p = to(u, v); p[1] -= 0.012; return p; }, M.frame));
-    root.add(shapeMesh(SCREEN, [], (u, v) => { const p = to(u, v); p[1] += 0.01; return p; }, M.glass));
-    // side wall with its two windows (u = y ahead, v = z), and their frames
-    const toW = (u, v) => [s * (HALF - 0.004 * (v - FLOOR)), u, v];
-    const wall = [[wallFrontY(FLOOR), FLOOR], [REAR, FLOOR], [REAR, ROOF], [wallFrontY(ROOF), ROOF]];
-    const r1 = grow(SIDE1, 0.05), r2 = grow(SIDE2, 0.05);
-    root.add(shapeMesh(wall, [r1, r2], toW, M.lining));
-    for (const [r, w] of [[r1, SIDE1], [r2, SIDE2]]) {
-      root.add(shapeMesh(r, [w], (u, v) => { const p = toW(u, v); p[0] -= s * 0.012; return p; }, M.frame));
-      root.add(shapeMesh(w, [], (u, v) => { const p = toW(u, v); p[0] += s * 0.008; return p; }, M.glass));
+  // (the deck's own walls, windows, roof, floor and door, unless the free model's shell is there)
+  if (!shell) {
+    // windscreens and the walls round them, either side of the centre post
+    for (const s of [-1, 1]) {
+      const to = (u, v) => [s * u, frontY(u, v), v];
+      const outer = [[0, -0.40], [HALF, -0.40], [HALF, ROOF], [0, ROOF]]; // (below the glareshield's top: hidden)
+      const ring = grow(SCREEN, 0.045);
+      root.add(shapeMesh(outer, [ring], to, M.lining));
+      root.add(shapeMesh(ring, [SCREEN], (u, v) => { const p = to(u, v); p[1] -= 0.012; return p; }, M.frame));
+      root.add(shapeMesh(SCREEN, [], (u, v) => { const p = to(u, v); p[1] += 0.01; return p; }, M.glass));
+      // side wall with its two windows (u = y ahead, v = z), and their frames
+      const toW = (u, v) => [s * (HALF - 0.004 * (v - FLOOR)), u, v];
+      const wall = [[wallFrontY(FLOOR), FLOOR], [REAR, FLOOR], [REAR, ROOF], [wallFrontY(ROOF), ROOF]];
+      const r1 = grow(SIDE1, 0.05), r2 = grow(SIDE2, 0.05);
+      root.add(shapeMesh(wall, [r1, r2], toW, M.lining));
+      for (const [r, w] of [[r1, SIDE1], [r2, SIDE2]]) {
+        root.add(shapeMesh(r, [w], (u, v) => { const p = toW(u, v); p[0] -= s * 0.012; return p; }, M.frame));
+        root.add(shapeMesh(w, [], (u, v) => { const p = toW(u, v); p[0] += s * 0.008; return p; }, M.glass));
+      }
+      // a sun visor folded up against the frame
+      const vx = 0.62 * k;
+      root.add(box(0.55 * k, 0.012, 0.16, std(0x2b2f35, { transparent: true, opacity: 0.8 }), s * vx, frontY(vx, 0.3) - 0.08, 0.36, [-0.2, 0, 0]));
+      // the wiper: it turns about its foot at the bottom outboard corner of the windscreen, across the glass
+      const footX = 0.86 * k, footZ = -0.235;
+      const piv = new THREE.Group();
+      piv.position.set(s * footX, frontY(footX, footZ) - 0.022, footZ);
+      // (the windscreen's plane: its normal, the axis the wiper turns about)
+      const nrm = new THREE.Vector3(s * D.wsK, 1, D.wsZ).normalize();
+      piv.userData = { axis: nrm, side: s };
+      const arm = box(0.50 * k, 0.008, 0.010, M.frame, -s * 0.25 * k, 0, 0);
+      // (lying along the bottom of the glass, inward)
+      const tilt = new THREE.Group();
+      tilt.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), nrm.clone());
+      tilt.add(arm); arm.rotation.z = 0;
+      piv.add(tilt);
+      root.add(piv);
+      wipers.push(piv);
     }
-    // a sun visor folded up against the frame
-    const vx = 0.62 * k;
-    root.add(box(0.55 * k, 0.012, 0.16, std(0x2b2f35, { transparent: true, opacity: 0.8 }), s * vx, frontY(vx, 0.3) - 0.08, 0.36, [-0.2, 0, 0]));
-    // the wiper: it turns about its foot at the bottom outboard corner of the windscreen, across the glass
-    const footX = 0.86 * k, footZ = -0.235;
-    const piv = new THREE.Group();
-    piv.position.set(s * footX, frontY(footX, footZ) - 0.022, footZ);
-    // (the windscreen's plane: its normal, the axis the wiper turns about)
-    const nrm = new THREE.Vector3(s * D.wsK, 1, D.wsZ).normalize();
-    piv.userData = { axis: nrm, side: s };
-    const arm = box(0.50 * k, 0.008, 0.010, M.frame, -s * 0.25 * k, 0, 0);
-    // (lying along the bottom of the glass, inward)
-    const tilt = new THREE.Group();
-    tilt.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), nrm.clone());
-    tilt.add(arm); arm.rotation.z = 0;
-    piv.add(tilt);
-    root.add(piv);
-    wipers.push(piv);
-  }
-  // the centre post
-  root.add(shapeMesh([[-0.045, -0.25], [0.045, -0.25], [0.045, 0.30], [-0.045, 0.30]], [], (u, v) => [u, frontY(u, v) - 0.014, v], M.frame));
+    // the centre post
+    root.add(shapeMesh([[-0.045, -0.25], [0.045, -0.25], [0.045, 0.30], [-0.045, 0.30]], [], (u, v) => [u, frontY(u, v) - 0.014, v], M.frame));
 
-  // roof, floor, rear wall
-  root.add(shapeMesh([[-HALF, REAR], [HALF, REAR], [HALF, wallFrontY(ROOF)], [0, frontY(0, ROOF)], [-HALF, wallFrontY(ROOF)]], [], (u, v) => [u, v, ROOF], M.lining));
-  root.add(shapeMesh([[-HALF, REAR], [HALF, REAR], [HALF, 1.2], [-HALF, 1.2]], [], (u, v) => [u, v, FLOOR], M.floor));
-  root.add(shapeMesh([[-HALF, FLOOR], [HALF, FLOOR], [HALF, ROOF], [-HALF, ROOF]], [[[-0.4, FLOOR + 0.02], [0.4, FLOOR + 0.02], [0.4, 0.38], [-0.4, 0.38]]], (u, v) => [u, REAR, v], M.lining));
-  root.add(box(0.82, 0.05, 1.72, std(0x3a3e44), 0, REAR + 0.02, (FLOOR + 0.38) / 2)); // the door
+    // roof, floor, rear wall
+    root.add(shapeMesh([[-HALF, REAR], [HALF, REAR], [HALF, wallFrontY(ROOF)], [0, frontY(0, ROOF)], [-HALF, wallFrontY(ROOF)]], [], (u, v) => [u, v, ROOF], M.lining));
+    root.add(shapeMesh([[-HALF, REAR], [HALF, REAR], [HALF, 1.2], [-HALF, 1.2]], [], (u, v) => [u, v, FLOOR], M.floor));
+    root.add(shapeMesh([[-HALF, FLOOR], [HALF, FLOOR], [HALF, ROOF], [-HALF, ROOF]], [[[-0.4, FLOOR + 0.02], [0.4, FLOOR + 0.02], [0.4, 0.38], [-0.4, 0.38]]], (u, v) => [u, REAR, v], M.lining));
+    root.add(box(0.82, 0.05, 1.72, std(0x3a3e44), 0, REAR + 0.02, (FLOOR + 0.38) / 2)); // the door
+  }
 
   // the glareshield: its top from the windscreen's sill back to its lip, the face with the FCU and EFIS panels
   const lipY = (x) => (a320 ? 0.62 : 0.71) - (a320 ? 0.28 : 0.36) * Math.pow(Math.abs(x) / HALF, 2);
@@ -444,15 +449,19 @@ function build(kind, nEng, graftOn = false) {
   // side consoles with the side-sticks and tillers
   const sticks = [];
   for (const s of [-1, 1]) {
-    const mat = std(0xffffff, { map: consoleArt(s < 0).map, emissiveMap: consoleArt(s < 0).glow, emissive: 0x000000 });
-    lit.push(mat);
     const x0 = s * (HALF - 0.38), x1 = s * (HALF - 0.01), y0 = 0.62, y1 = -0.75, zt = -0.60;
-    const xa = Math.min(x0, x1), xb = Math.max(x0, x1);
-    root.add(quad([xa, y0, zt], [xb, y0, zt], [xa, y1, zt], [xb, y1, zt], mat)); // (forward at the picture's top)
-    root.add(shapeMesh([[y0, zt], [y1, zt], [y1, FLOOR], [y0, FLOOR]], [], (u, v) => [x0, u, v], M.console));
-    root.add(shapeMesh([[x0, zt], [x1, zt], [x1, FLOOR], [x0, FLOOR]], [], (u, v) => [u, y0, v], M.console));
-    // the side-stick: a boot, the grip leaning a little forward and outward
-    const st = new THREE.Group(); st.position.set(s * (HALF - 0.23), 0.30, zt + 0.004); root.add(st);
+    if (!shell) {
+      const mat = std(0xffffff, { map: consoleArt(s < 0).map, emissiveMap: consoleArt(s < 0).glow, emissive: 0x000000 });
+      lit.push(mat);
+      const xa = Math.min(x0, x1), xb = Math.max(x0, x1);
+      root.add(quad([xa, y0, zt], [xb, y0, zt], [xa, y1, zt], [xb, y1, zt], mat)); // (forward at the picture's top)
+      root.add(shapeMesh([[y0, zt], [y1, zt], [y1, FLOOR], [y0, FLOOR]], [], (u, v) => [x0, u, v], M.console));
+      root.add(shapeMesh([[x0, zt], [x1, zt], [x1, FLOOR], [x0, FLOOR]], [], (u, v) => [u, y0, v], M.console));
+    }
+    // the side-stick: a boot, the grip leaning a little forward and outward (on the free model's console before
+    // the pilot's knee where its shell is there)
+    const stAt = shell ? D.stick : [HALF - 0.23, 0.30, zt + 0.004];
+    const st = new THREE.Group(); st.position.set(s * stAt[0], stAt[1], stAt[2]); root.add(st);
     const boot = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.045, 0.03, 20), M.leather); boot.rotation.x = Math.PI / 2; boot.position.z = 0.015; st.add(boot);
     const grip = new THREE.Group(); grip.position.z = 0.03; st.add(grip);
     const g1 = rounded(0.038, 0.045, 0.11, 0.016, std(0x1c1e21, { roughness: 0.6 })); g1.position.z = 0.06; grip.add(g1);
@@ -460,7 +469,8 @@ function build(kind, nEng, graftOn = false) {
     grip.add(box(0.012, 0.012, 0.025, std(0xb33a2a), 0, 0.022, 0.09)); // (the take-over button is red)
     sticks.push({ side: s, grip });
     // tiller wheel ahead of the stick
-    const til = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, 0.018, 24), M.knob); til.rotation.x = Math.PI / 2; til.position.set(s * (HALF - 0.28), 0.50, zt + 0.012); root.add(til);
+    const tilAt = shell ? D.tiller : [HALF - 0.28, 0.50, zt + 0.012];
+    const til = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, 0.018, 24), M.knob); til.rotation.x = Math.PI / 2; til.position.set(s * tilAt[0], tilAt[1], tilAt[2]); root.add(til);
     // the rudder pedals under the panel
     for (const dx of [-0.09, 0.09]) root.add(box(0.07, 0.03, 0.14, M.knob, s * EYE_X + dx, P.y - 0.2, -1.05, [-0.5, 0, 0]));
   }
@@ -478,8 +488,10 @@ function build(kind, nEng, graftOn = false) {
     root.add(shapeMesh([[-w, zf], [w, zf], [w, ROOF], [-w, ROOF]], [], (u, v) => [u, f, v], M.panel));
   }
 
-  // the seats (the captain's is behind the camera; the first officer's is seen looking right)
-  for (const s of [-1, 1]) {
+  // the seats (the captain's is behind the camera; the first officer's is seen looking right); or the free model's
+  // walls, roof, floor, seats, side consoles and door
+  if (shell) root.add(new THREE.Mesh(shell, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, metalness: 0.04, side: THREE.DoubleSide })));
+  else for (const s of [-1, 1]) {
     const g = new THREE.Group(); g.position.set(s * EYE_X, -0.42, 0); root.add(g);
     const cush = rounded(0.50, 0.50, 0.10, 0.05, M.seat); cush.position.set(0, 0.05, -0.80); g.add(cush);
     const back = rounded(0.50, 0.12, 0.70, 0.05, M.seat); back.position.set(0, -0.22, -0.40); back.rotation.x = -0.18; g.add(back);
@@ -498,7 +510,7 @@ function build(kind, nEng, graftOn = false) {
 
   const scene = new THREE.Scene();
   scene.add(root);
-  return { kind, nEng, eyeX: D.EYE_X, scene, root, screens, gear, levers, sticks, lit, panels, clickables, wipers, hemi, sun, amb, dome, flood,
+  return { kind, nEng, eyeX: D.EYE_X, D, shell: !!shell, scene, root, screens, gear, levers, sticks, lit, panels, clickables, wipers, hemi, sun, amb, dome, flood,
     at: { lipY, GT, GF, faceY, ped, P } }; // (`at`: where the grafted modules go)
 }
 
@@ -510,6 +522,44 @@ function build(kind, nEng, graftOn = false) {
 const FG_PACK = new URL('../cockpits/A320-family.fgck', import.meta.url).href;
 const fg = { pack: null, loading: null, failed: false, Deck: null };
 const fgKind = (kind) => ['a320', 'a330', 'a330neo', 'a340', 'a346'].includes(kind) && !fg.failed && !/[?&]built\b/.test(location.search);
+// ---------- the A350's walls, roof, floor, seats and consoles from a free model ----------
+// cockpits/A350-shell.bin (tools/build_a350_shell.py: "Airbus Cockpit Interior" by davidolaleye1, CC-BY-4.0, in the
+// A350's colours, without its glass, buttons, screens, pedestal and side-sticks): it stands in for the deck's own walls,
+// windows, roof, floor, door, seats and console boxes once it has come (not with ?built). Its numbers: the captain's eye
+// at its seat, the walls further out, its floor; the side-sticks and tillers on its consoles before the pilots' knees.
+const SHELL_URL = new URL('../cockpits/A350-shell.bin', import.meta.url).href;
+const SHELL_DECK = { EYE_X: 0.60, HALF: 1.55, FLOOR: -1.33, stick: [0.91, 0.46, -0.716], tiller: [1.12, 0.62, -0.706] };
+const shellSt = { geo: null, loading: null, failed: false };
+const shellKind = (kind) => kind === 'a350' && !shellSt.failed && !/[?&]built\b/.test(location.search);
+function shellLoad() {
+  if (shellSt.loading) return;
+  shellSt.loading = fetch(SHELL_URL).then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.arrayBuffer(); })
+    .then((buf) => {
+      shellSt.geo = shellGeometry(buf);
+      for (const k of Object.keys(pits)) if (shellKind(pits[k].kind) && !pits[k].shell) delete pits[k];
+      if (FG.view3d && FG.view3d.map) FG.view3d.map.triggerRepaint();
+    })
+    .catch((e) => { shellSt.failed = true; console.warn('the A350 deck\'s walls and seats (cockpits/A350-shell.bin) did not load:', e); });
+}
+// "A35S", version, the triangle count, then three corners each: position (mm, 3 × i16), normal (3 × i8), colour (sRGB 3 × u8)
+function shellGeometry(buf) {
+  const dv = new DataView(buf);
+  if (String.fromCharCode(dv.getUint8(0), dv.getUint8(1), dv.getUint8(2), dv.getUint8(3)) !== 'A35S') throw new Error('not an A350 shell');
+  const n = dv.getUint32(8, true) * 3;
+  const pos = new Float32Array(n * 3), nor = new Float32Array(n * 3), col = new Float32Array(n * 3);
+  const lin = (c) => { const x = c / 255; return x <= 0.04045 ? x / 12.92 : Math.pow((x + 0.055) / 1.055, 2.4); };
+  for (let i = 0, o = 12; i < n; i++, o += 12) for (let k = 0; k < 3; k++) {
+    pos[i * 3 + k] = dv.getInt16(o + 2 * k, true) / 1000;
+    nor[i * 3 + k] = dv.getInt8(o + 6 + k) / 127;
+    col[i * 3 + k] = lin(dv.getUint8(o + 9 + k));
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  g.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
+  g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  g.computeBoundingSphere();
+  return g;
+}
 // (the A350s and the A380 keep their own deck, with the A320's 3D modules grafted on: graft below)
 const graftKind = (kind) => kind === 'a350' && !fg.failed && !/[?&]built\b/.test(location.search);
 function fgLoad() {
@@ -1855,10 +1905,12 @@ export function draw(renderer, gl, { sunB, day, fov, look, lookDown }) {
   if (!P || !P.active) return;
   const kind = kindOf(P.type) || 'a350', nEng = (P.state.spec && P.state.spec.engines) || 2;
   // (the A320s, A330s and A340s: FlightGear's real deck once its pack has come, the deck built here until then)
-  const real = fgKind(kind), grafted = graftKind(kind);
+  const real = fgKind(kind), grafted = graftKind(kind), shelled = shellKind(kind);
   if ((real || grafted) && !fg.pack) fgLoad();
-  const key = `${real && fg.pack ? 'fg-' : grafted && fg.pack ? 'g-' : ''}${kind}${nEng}`;
-  if (!pits[key]) pits[key] = real && fg.pack ? buildFg(kind, nEng) : grafted && fg.pack ? graft(build(kind, nEng, true)) : build(kind, nEng);
+  if (shelled && !shellSt.geo) shellLoad();
+  const shell = shelled ? shellSt.geo : null;
+  const key = `${real && fg.pack ? 'fg-' : grafted && fg.pack ? 'g-' : ''}${shell ? 's-' : ''}${kind}${nEng}`;
+  if (!pits[key]) pits[key] = real && fg.pack ? buildFg(kind, nEng) : grafted && fg.pack ? graft(build(kind, nEng, true, shell)) : build(kind, nEng, false, shell);
   const was = pit;
   pit = pits[key];
   useDeck(kind);
@@ -1979,4 +2031,4 @@ function fgSpot(label, near) {
   return use.reduce((a, p) => a.add(p), new THREE.Vector3()).divideScalar(use.length).toArray();
 }
 FG.cockpit3d = { get pit() { return pit; }, get clickCount() { return clickCount; }, fgSpot, get drawnAt() { return drawnAt; }, clicks, has, draw, eye, project: (p) => new THREE.Vector3(...p).project(camera).toArray(),
-  hitAt(x, y) { const h = pick({ clientX: x, clientY: y }); return h ? { tip: typeof h.c.tip === 'function' ? h.c.tip() : h.c.tip || '', shown: shown() } : { tip: null, shown: shown() }; }, get EYE_X() { const k = FG.pilot && kindOf(FG.pilot.type); return seat.x != null && k ? seat.x : (k ? DECKS[k] : DECKS.a350).EYE_X; }, move }; // (move: the views, Ctrl + arrows) // (the game's view3d.js draws through this)
+  hitAt(x, y) { const h = pick({ clientX: x, clientY: y }); return h ? { tip: typeof h.c.tip === 'function' ? h.c.tip() : h.c.tip || '', shown: shown() } : { tip: null, shown: shown() }; }, get EYE_X() { const k = FG.pilot && kindOf(FG.pilot.type); return seat.x != null && k ? seat.x : pit && pit.kind === k && pit.shell ? pit.D.EYE_X : (k ? DECKS[k] : DECKS.a350).EYE_X; }, move }; // (move: the views, Ctrl + arrows) // (the game's view3d.js draws through this)

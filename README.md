@@ -224,7 +224,9 @@ stay the A350's. The information system (OIS) beside each pilot has tabs along i
 navigation map (the airport map under 10 NM) with its own settings beside it, apart from the pilot's ND (RANGE − / +,
 ARC · ROSE · PLAN, AIRPORT, CSTR · WPT · VOR.D · NDB · ARPT, TERR, and = ND to take the ND's); T.O PERF, LDG PERF and
 CHECKLIST are the flight's papers. Until the pack has come, or with `?built`, the A350's painted FCU, EFIS and
-keyboards stand in.
+keyboards stand in. Its walls, window frames, roof, floor, seats, side consoles and door are a free model's
+(`cockpits/A350-shell.bin`: "Airbus Cockpit Interior" by davidolaleye1, CC-BY-4.0, see `cockpits/README.md`), in the
+A350's colours; the side-sticks and tillers stand on its consoles before the pilots' knees.
 
 Each version keeps its own on the screens and on the overhead (0) and pedestal (9) pages (`src/panels.js` LAYOUTS;
 the built deck has them in 3D too):
