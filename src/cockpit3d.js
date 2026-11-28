@@ -528,7 +528,7 @@ const fgKind = (kind) => ['a320', 'a330', 'a330neo', 'a340', 'a346'].includes(ki
 // windows, roof, floor, door, seats and console boxes once it has come (not with ?built). Its numbers: the captain's eye
 // at its seat, the walls further out, its floor; the side-sticks and tillers on its consoles before the pilots' knees.
 const SHELL_URL = new URL('../cockpits/A350-shell.bin', import.meta.url).href;
-const SHELL_DECK = { EYE_X: 0.60, HALF: 1.55, FLOOR: -1.33, stick: [0.91, 0.46, -0.716], tiller: [1.12, 0.62, -0.706] };
+const SHELL_DECK = { EYE_X: 0.53, HALF: 1.55, FLOOR: -1.33, stick: [0.91, 0.46, -0.716], tiller: [1.12, 0.62, -0.706] };
 const shellSt = { geo: null, loading: null, failed: false };
 const shellKind = (kind) => kind === 'a350' && !shellSt.failed && !/[?&]built\b/.test(location.search);
 function shellLoad() {

@@ -22,6 +22,7 @@ import io, json, math, os, struct, sys, zipfile
 from PIL import Image
 
 S = 0.85                      # (its units to metres in the cockpit)
+SEAT_X = 0.53                 # (the pilots' eyes off the middle, as Airbus's A350 drawings: the seats moved in to them)
 XE, YE, ZC = 201.755, 1.238, -309.29  # (the eye's place aft and up, the deck's middle across)
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'cockpits', 'A350-shell.bin')
 
@@ -141,11 +142,11 @@ def main(src):
                 acc_[j] += c[j] / 255
         return tuple(a / max(1, len(ts)) for a in acc_)
 
-    tris = []  # [(corners [(pos, normal)] in its frame, colour, mirror)]
+    tris = []  # [(corners [(pos, normal)] in its frame, colour, mirror, shift across (m, cockpit x))]
 
-    def add(m, ts, colour, mirror=False):
+    def add(m, ts, colour, mirror=False, shift=0.0):
         for t in ts:
-            tris.append(([(m['v'][m['i'][t + k]], m['n'][m['i'][t + k]]) for k in range(3)], colour, mirror))
+            tris.append(([(m['v'][m['i'][t + k]], m['n'][m['i'][t + k]]) for k in range(3)], colour, mirror, shift))
 
     # the walls, window frames and floor: the frames dark grey (dark on its texture, round the windows), the floor where
     # it faces up low down;
@@ -172,7 +173,7 @@ def main(src):
             px = img.getpixel((int((u % 1) * (W - 1)), int((vv % 1) * (H - 1))))
             lum = (0.2126 * px[0] + 0.7152 * px[1] + 0.0722 * px[2]) / 255
             col = FLOOR if (y < -0.2 and abs(ny) > 0.7) else FRAME if lum < 0.12 and y > WINDOWS_Y else LINING
-            tris.append(([(c3[k], n3[k]) for k in range(3)], col, False))
+            tris.append(([(c3[k], n3[k]) for k in range(3)], col, False, 0.0))
 
     # the roof: its shells, not the small switches on it
     roof = part('RoofUnwrap')
@@ -183,6 +184,9 @@ def main(src):
     # the seats (the captain's, and mirrored for the first officer), the door and what is on the back wall; not its
     # side-sticks
     chair = part('Chair')
+    # (the captain's seat's middle across, from its headrest: the seats go to SEAT_X off the middle)
+    heads = [b for ts, b in pieces(chair) if b[1] > 1.0 and 201.3 < (b[0] + b[3]) / 2 < 202.6 and (b[2] + b[5]) / 2 > ZC]
+    seat_shift = (-SEAT_X) - (-(((heads[0][2] + heads[0][5]) / 2) - ZC) * S) if heads else 0.0
     for ts, b in pieces(chair):
         cx, cy, cz = (b[0] + b[3]) / 2, (b[1] + b[4]) / 2, (b[2] + b[5]) / 2
         if 201.0 < cx < 201.4 and b[4] < 0.6:
@@ -194,18 +198,18 @@ def main(src):
         lum = 0.2126 * r + 0.7152 * gg + 0.0722 * bb
         if seat:
             col = SEAT_DARK if lum < 0.18 else METAL if abs(r - bb) < 0.06 and lum < 0.55 and (b[3] - b[0]) < 0.15 else SEAT
-            add(chair, ts, col)
-            add(chair, ts, col, mirror=True)
+            add(chair, ts, col, shift=seat_shift)
+            add(chair, ts, col, mirror=True, shift=seat_shift)
         else:
             add(chair, ts, SEAT_DARK if lum < 0.15 else DOOR if lum > 0.55 else CONSOLE)
 
     # into the cockpit's frame: x = -(z - ZC) S, y = -(x - XE) S, z = (y - YE) S (mirrored: x = -x, the corners turned)
     out = bytearray(b'A35S')
     out += struct.pack('<II', 1, len(tris))
-    for corners, col, mirror in tris:
+    for corners, col, mirror, shift in tris:
         cs = list(reversed(corners)) if mirror else corners
         for (p, n) in cs:
-            x, y, zz = -(p[2] - ZC) * S, -(p[0] - XE) * S, (p[1] - YE) * S
+            x, y, zz = -(p[2] - ZC) * S + shift, -(p[0] - XE) * S, (p[1] - YE) * S
             nx, ny, nz = -n[2], -n[0], n[1]
             if mirror:
                 x, nx = -x, -nx
